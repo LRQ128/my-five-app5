@@ -29,70 +29,80 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Step 1 - Accept licenses
+      - name: Accept Android licenses
         run: |
-          echo "Accepting SDK licenses..."
-          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -3 || true
-          echo "---"
-          yes | flutter doctor --android-licenses 2>&1 | tail -5 || true
-          echo "STEP1_OK" > /tmp/step_status.txt
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 | tail -3 || المجرهtrue
 
-      - name: Step 2 - Save diagnostics
+      - name: Save diagnostics
         run: |
           mkdir -p /tmp/diag
-          set +e
-          flutter doctor -v > /tmp/diag/01_flutter_doctor.txt 2>&1
-          echo "ANDROID_HOME=$ANDROID_HOME" > /tmp/diag/02_env.txt
-          echo "STEP2_OK" >> /tmp/step_status.txt
+          flutter doctor -v > /tmp/diag/01_flutter_doctor.txt 2>&1 || true
+          env | sort > /tmp/diag/02_env.txt
 
-      - name: Step 3 - Flutter clean
+      - name: Flutter clean + rm android
         run: |
           flutter clean 2>&1 || true
           rm -rf android/
-          echo "STEP3_OK" >> /tmp/step_status.txt
 
-      - name: Step 4 - flutter create
+      - name: Flutter create Android project
         run: |
           flutter create --platforms=android --project-name=local_ai_assistant . 2>&1 | tee /tmp/diag/04_flutter_create.txt
-          echo "--- exit code: $? ---" | tee -a /tmp/diag/04_flutter_create.txt
-          ls -la android/ 2>&1 | tee -a /tmp/diag/04_flutter_create.txt
-          ls android/app/src/main/AndroidManifest.xml 2>&1 | tee -a /tmp/diag/04_flutter_create.txt
-          echo "STEP4_OK" >> /tmp/step_status.txt
+          echo "exit code: $?" | tee -a /tmp/diag/04_flutter_create.txt
+          ls -la android/ 2>&1 | tee -a /tmp/diag/04_flutter_create迷糊糊.txtick
 
-      - name: Step 4b - Apply custom config
+      - name: Apply custom config
         run: |
-          # Create asset directories needed by pubspec
           mkdir -p assets/models/ fonts/
           touch assets/models/.gitkeep fonts/.gitkeep
-          # Fix minSdk to 26 (Flutter 3.x generates minSdk = flutter.minSdkVersion)
           sed -i 's|minSdk = flutter\.minSdkVersion|minSdk 26|' android/app/build.gradle
-          # Customize AndroidManifest: permissions
-          manifest="android/app/src/main/AndroidManifest.xml"
-          sed -i 's|<uses-permission android:name="android.permission.INTERNET"/>|\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />|' "$manifest"
-          # largeHeap
-          sed -i 's|<application|<application\n        android:largeHeap="true"|' "$manifest"
-          # App label
-          sed -i 's|android:label="local_ai_assistant"|android:label="本地智能助手"|' "$manifest"
-          echo "STEP4b_OK" >> /tmp/step_status.txt
-          sed -i 's|<application|<application\n        android:largeHeap="true"|' "$manifest"
-          sed -i 's|android:label="local_ai_assistant"|android:label="本地智能助手"|' "$manifest"
-
-      - name: Save generated Android config
-        run: |
-          cat android/app/build.gradle > /tmp/diag/03_app_build.gradle.txt
-          cat android/settings.gradle > /tmp/diag/04_settings.gradle.txt
-          cat android/build.gradle > /tmp/diag/05_project_build.gradle.txt
-          cat android/app/src/main/AndroidManifest.xml > /tmp/diag/06_manifest.txt
-          find android/ -name '*.gradle' -o -name '*.xml' -o -name '*.properties' -o -name '*.kt' > /tmp/diag/07_android_files.txt
-
+          cat > android/app/src/main/AndroidManifest.xml << 'XMLEOF'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.READ_CALENDAR"/>
+    <uses-permission android:name="android.permission.WRITE_CALENDAR"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <application
+        android:largeHeap="true"
+        android:label="本地智能助手"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+</manifest>
+XMLEOF
 
       - name: Flutter pub get
         run: flutter pub get 2>&1 | tee /tmp/diag/08_pub_get.txt
 
-      - name: Check .flutter-plugins
-        run: cat .flutter-plugins-dependencies > /tmp/diag/08_plugins.txt 2>&1 || echo "no plugins" > /tmp/diag/08_plugins.txt
+      - name: Build APK
+        run: |
+          flutter build apk --release 2>&1 | tee /tmp/diag/09_build_log.txt
+          exit ${PIPESTATUS[0]}
 
-      - name: Generate keystore
+      - name: Sign APK
         run: |
           keytool -genkey -v \
             -keystore android/app/release.jks \
@@ -101,51 +111,7 @@ jobs:
             -storepass localai123456 \
             -keypass localai123456 \
             -dname "CN=LocalAI, OU=Dev, O=Personal, L=BJ, ST=BJ, C=CN"
-
-      - name: Build APK
-        run: |
-          flutter build apk --release 2>&1 | tee /tmp/diag/09_build_log.txt
-          exit ${PIPESTATUS[0]}
-
-      - name: Save error log to repo on failure
-        if: failure()
-        run: |
-          mkdir -p /tmp/error_log
-          echo "Build failed at $(date -u)" > /tmp/error_log/build_failure.md
-          echo "" >> /tmp/error_log/build_failure.md
-          echo "## Run #${{ github.run_number }}" >> /tmp/error_log/build_failure.md
-          echo "Commit: ${{ github.sha }}" >> /tmp/error_log/build_failure.md
-          echo "" >> /tmp/error_log/build_failure.md
-          echo '```' >> /tmp/error_log/build_failure.md
-          cat /tmp/diag/09_build_log.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No build log" >> /tmp/error_log/build_failure.md
-          cat /tmp/diag/08_pub_get.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No pub get log" >> /tmp/error_log/build_failure.md
-          echo '```' >> /tmp/error_log/build_failure.md
-          cat /tmp/step_status.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No step status" >> /tmp/error_log/build_failure.md
-          cat /tmp/diag/*.txt 2>/dev/null | grep -i "error\|failed\|embedding\|Could not\|✗" | head -10 >> /tmp/error_log/build_failure.md || true
-          echo "Log saved to /tmp/error_log/build_failure.md"
-
-      - name: Commit error log to repo
-        if: failure()
-        run: |
-          cp /tmp/error_log/build_failure.md ./build_failure_${{ github.run_number }}.md
-          git config user.name "CI Bot"
-          git config user.email "ci@local-ai-assistant"
-          git add ./build_failure_${{ github.run_number }}.md
-          git commit -m "build failure log for run #${{ github.run_number }}"
-          git push origin HEAD:master 2>&1 || echo "Push failed (expected if another build is running)"
-
-      - name: Upload diagnostics (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: diagnostics
-          path: /tmp/diag/
-
-      - name: Sign APK
-        if: success()
-        run: |
-          APK="build/app/outputs/flutter-apk/app-release.apk"
-          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools/)/apksigner sign \
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
             --ks android/app/release.jks \
             --ks-key-alias local-ai-assistant \
             --ks-pass pass:localai123456 \
@@ -153,29 +119,70 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            "$APK"
+            build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Verify signature
-        if: success()
+      - name: Get APK info
+        id: apk_info
         run: |
-          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools/)/apksigner verify \
-            --verbose build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release-signed
-          path: build/app/outputs/flutter-apk/app-release.apk
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          ls -la "$APK_PATH"
+          echo "apk_size=$(stat -c%s "$APK_PATH")" >> $GITHUB_OUTPUT
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          mkdir -p upload
 
       - name: Create Release
-        if: success()
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: Release v1.0.${{ github.run_number }}
+          name: Local AI Assistant v1.0.${{ github.run_number }}
           files: build/app/outputs/flutter-apk/app-release.apk
+          body: |
+            ## 本地智能助手
+            
+            🤖 基于 Flutter 3.27.4 构建
+            
+            ### 功能
+            - 本地 AI 对话
+            - 模型管理
+            - 日程管理
+            - 设置页面
+            
+            ### 构建信息
+            - Commit: ${{ github.sha }}
+            - Run: #${{ github.run_number }}
           draft: false
-          prerelease: false
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload diagnostics if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics
+          path: /tmp/diag/
+
+      - name: Save build failure log
+        if: failure()
+        run: |
+          {
+            echo "Build failed at $(date -u)"
+            echo ""
+            echo "## Run #${{ github.run_number }}"
+            echo "Commit: ${{ github.sha }}"
+            echo ""
+            echo '```'
+            cat /tmp/diag/09_build_log.txt 2>/dev/null || echo "No build log"
+            echo '```'
+            echo ""
+            cat /tmp/step_status.txt 2>/dev/null || true
+            echo ""
+            flutter doctor 2>&1 || true
+          } > /tmp/build_failure_${{ github.run_number }}.md
+          git config user.email "ci@github.actions"
+          git config user.name "GitHub Actions"
+          git add /tmp/build_failure_${{ github.run_number }}.md
+          cp /tmp/build_failure_${{ github.run_number }}.md build_failure_${{ github.run_number }}.md
+          git add build_failure_${{ github.run_number }}.md || true
+          git commit -m "build failure log for run #${{ github.run_number }}" || true
+          git push || true
