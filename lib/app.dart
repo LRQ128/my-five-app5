@@ -4,6 +4,7 @@ import 'services/model_manager.dart';
 import 'services/conversation_service.dart';
 import 'services/agent_engine.dart';
 import 'services/llm_service.dart';
+import 'services/memory_service.dart';
 import 'tools/tool_registry.dart';
 import 'utils/constants.dart';
 
@@ -19,6 +20,7 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
   late final ConversationService conversationService;
   late final AgentEngine agentEngine;
   late final ToolRegistry toolRegistry;
+  late final MemoryService memoryService;
 
   bool _initialized = false;
   String? _initError;
@@ -35,8 +37,12 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
       toolRegistry = ToolRegistry();
       toolRegistry.registerDefaults();
 
-      // 2. 初始化模型管理器
-      modelManager = ModelManager();
+      // 2a. 初始化记忆服务
+      memoryService = MemoryService();
+      await memoryService.init();
+
+      // 2b. 注入记忆服务到模型管理器
+      modelManager.injectMemoryService(memoryService);
 
       // 3. 初始化对话服务
       conversationService = ConversationService();

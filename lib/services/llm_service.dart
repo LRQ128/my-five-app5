@@ -1,104 +1,70 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
+import 'dart:io';
 
-import 'package:uuid/uuid.dart';
+import 'package:http/http.dart' as http;
 import '../models/message.dart';
 import '../models/model_config.dart';
+import 'memory_service.dart';
 
 // =============================================================================
 // 抽象 LLM 服务接口
 // =============================================================================
 
-/// LLM 推理服务的抽象接口。
-/// 支持 load / unload / generate / streamGenerate / stop。
 abstract class LlmService {
-  /// 是否已加载模型
   bool get isModelLoaded;
-
-  /// 当前加载的模型配置
   ModelConfig? get currentConfig;
-
-  /// 加载模型到内存
   Future<void> loadModel(ModelConfig config);
-
-  /// 卸载模型，释放资源
   Future<void> unloadModel();
-
-  /// 一次性生成完整回复
-  Future<String> generate(
-    String prompt, {
-    List<Message>? history,
-    int maxTokens,
-    double? temperature,
-    double? topP,
-  });
-
-  /// 流式逐 token 生成，返回 Stream<String>（每个 token 为一个事件）
-  Stream<String> streamGenerate(
-    String prompt, {
-    List<Message>? history,
-    int maxTokens,
-    double? temperature,
-    double? topP,
-  });
-
-  /// 带工具调用的流式生成。
-  /// 返回 Stream<String>，其中特殊 token 序列包含 tool_calls 的 JSON。
-  /// 格式: 正常文本 token -> {tool_call: {...}} -> 正常文本 ...
-  Stream<String> generateWithTools(
-    String prompt, {
-    List<Message>? history,
-    List<Map<String, dynamic>>? tools,
-    int maxTokens,
-    double? temperature,
-    double? topP,
-  });
-
-  /// 停止当前推理
+  Future<String> generate(String prompt, {List<Message>? history, int maxTokens, double? temperature, double? topP});
+  Stream<String> streamGenerate(String prompt, {List<Message>? history, int maxTokens, double? temperature, double? topP});
+  Stream<String> generateWithTools(String prompt, {List<Message>? history, List<Map<String, dynamic>>? tools, int maxTokens, double? temperature, double? topP});
   void stop();
 }
 
 // =============================================================================
-// llama.cpp 实现（mock 模式，当前不实际调用 libllama.so）
+// Ollama 后端实现 — 通过 HTTP API 调用本地 Ollama 服务
 // =============================================================================
 
-/// llama.cpp 后端实现（当前 mock 模式）。
-///
-/// 当前阶段所有 generate 方法返回模拟数据（mock），方便 UI 调试。
-/// 后续需接入真实 llama.cpp FFI 调用时，参考 _nativeGenerate 注释。
-class LlamaCppService implements LlmService {
-  // ---------------------------------------------------------------------------
-  // 内部状态
-  // ---------------------------------------------------------------------------
-
+class OllamaService implements LlmService {
   @override
   bool isModelLoaded = false;
 
   @override
   ModelConfig? currentConfig;
 
-  /// 停止标志，用于中断推理循环
   bool _stopRequested = false;
+  http.Client? _activeClient;
+  StreamSubscription? _activeSubscription;
 
-  final _uuid = const Uuid();
+  /// Ollama 服务地址（手机本地，Ollama 默认监听 11434）
+  final String baseUrl;
+
+  /// 记忆服务（长对话记忆与自我进化）
+  final MemoryService? memoryService;
+
+  OllamaService({this.baseUrl = 'http://localhost:11434', this.memoryService});
 
   // ---------------------------------------------------------------------------
-  // 构造
-  // ---------------------------------------------------------------------------
-
-  LlamaCppService();
-
-  // ---------------------------------------------------------------------------
-  // 模型加载 / 卸载（mock：仅设置状态）
+  // 模型加载 / 卸载
   // ---------------------------------------------------------------------------
 
   @override
   Future<void> loadModel(ModelConfig config) async {
-    if (isModelLoaded) {
-      await unloadModel();
+    if (isModelLoaded) await unloadModel();
+
+    // 校验 Ollama 服务是否可达
+    try {
+      final resp = await http.get(Uri.parse('$baseUrl/api/tags')).timeout(const Duration(seconds: 5));
+      if (resp.statusCode != 200) {
+        throw Exception('Ollama 服务不可用 (HTTP ${resp.statusCode})');
+      }
+    } on SocketException {
+      throw Exception('无法连接到 Ollama，请确保已在 Termux 中运行 ollama serve');
+    } on TimeoutException {
+      throw Exception('连接 Ollama 超时，请确认 Ollama 已启动');
     }
-    // mock 模式：只设置状态，不实际加载模型文件
+
     isModelLoaded = true;
     currentConfig = config;
     _stopRequested = false;
@@ -107,34 +73,67 @@ class LlamaCppService implements LlmService {
   @override
   Future<void> unloadModel() async {
     _stopRequested = true;
+    await _activeSubscription?.cancel();
+    _activeClient?.close();
     isModelLoaded = false;
     currentConfig = null;
   }
 
   // ---------------------------------------------------------------------------
-  // 生成（当前阶段使用 mock 数据）
+  // 生成
   // ---------------------------------------------------------------------------
 
   @override
   Future<String> generate(
     String prompt, {
     List<Message>? history,
-    int maxTokens = 1024,
+    int maxTokens = 4096,
     double? temperature,
     double? topP,
   }) async {
-    return _mockGenerate(prompt, history: history);
+    final modelName = _getModelName();
+    final messages = _buildMessages(prompt, history: history);
+
+    try {
+      final resp = await http.post(
+        Uri.parse('$baseUrl/api/chat'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'model': modelName,
+          'messages': messages,
+          'stream': false,
+          'options': {
+            if (temperature != null) 'temperature': temperature,
+            if (topP != null) 'top_p': topP,
+            'num_predict': maxTokens,
+          },
+        }),
+      ).timeout(const Duration(seconds: 120));
+
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final msg = data['message'] as Map<String, dynamic>?;
+        return (msg?['content'] as String?) ?? '';
+      } else {
+        return '⚠️ Ollama 返回错误: ${resp.statusCode}\n${resp.body}';
+      }
+    } catch (e) {
+      return '⚠️ 调用 Ollama 失败: $e\n\n'
+          '请确保已在 Termux 中运行:\n'
+          '  ollama serve\n'
+          '并已拉取模型: ollama pull qwen2.5:7b';
+    }
   }
 
   @override
   Stream<String> streamGenerate(
     String prompt, {
     List<Message>? history,
-    int maxTokens = 1024,
+    int maxTokens = 4096,
     double? temperature,
     double? topP,
   }) {
-    return _mockStreamGenerate(prompt, history: history);
+    return _streamChat(prompt, history: history, maxTokens: maxTokens, temperature: temperature, topP: topP);
   }
 
   @override
@@ -142,146 +141,129 @@ class LlamaCppService implements LlmService {
     String prompt, {
     List<Message>? history,
     List<Map<String, dynamic>>? tools,
-    int maxTokens = 1024,
+    int maxTokens = 4096,
     double? temperature,
     double? topP,
   }) {
-    return _mockStreamGenerateWithTools(prompt, history: history, tools: tools);
+    // 目前 Ollama 的 tool calling 支持有限，先走普通流式
+    return _streamChat(prompt, history: history, maxTokens: maxTokens, temperature: temperature, topP: topP);
   }
 
   @override
   void stop() {
     _stopRequested = true;
+    _activeSubscription?.cancel();
+    _activeClient?.close();
   }
 
   // ---------------------------------------------------------------------------
-  // Mock 数据生成（UI 调试用，后续替换为真实 llama.cpp 推理）
+  // 核心：流式对话
   // ---------------------------------------------------------------------------
 
-  /// mock 一次性生成回复
-  Future<String> _mockGenerate(
+  Stream<String> _streamChat(
     String prompt, {
     List<Message>? history,
-  }) async {
-    await Future.delayed(const Duration(milliseconds: 800));
-    return _buildMockResponse(prompt);
-  }
-
-  /// mock 流式逐 token 输出
-  Stream<String> _mockStreamGenerate(
-    String prompt, {
-    List<Message>? history,
+    int maxTokens = 4096,
+    double? temperature,
+    double? topP,
   }) async* {
-    await Future.delayed(const Duration(milliseconds: 500));
-    final response = _buildMockResponse(prompt);
-    for (int i = 0; i < response.length; i++) {
-      if (_stopRequested) break;
-      await Future.delayed(Duration(milliseconds: 30 + Random().nextInt(30)));
-      yield response[i];
-    }
-  }
+    final modelName = _getModelName();
+    final messages = _buildMessages(prompt, history: history);
 
-  /// mock 带工具调用的流式生成
-  Stream<String> _mockStreamGenerateWithTools(
-    String prompt, {
-    List<Message>? history,
-    List<Map<String, dynamic>>? tools,
-  }) async* {
-    await Future.delayed(const Duration(milliseconds: 500));
+    _stopRequested = false;
+    http.Client client = http.Client();
+    _activeClient = client;
 
-    if (prompt.contains('天气') && tools != null && tools.isNotEmpty) {
-      const thinking = '让我查询一下天气信息...';
-      for (int i = 0; i < thinking.length; i++) {
-        if (_stopRequested) break;
-        await Future.delayed(const Duration(milliseconds: 25));
-        yield thinking[i];
-      }
-
-      final toolCallId = 'call_${_uuid.v4().substring(0, 8)}';
-      final toolCallJson = jsonEncode({
-        'tool_calls': [
-          {
-            'id': toolCallId,
-            'type': 'function',
-            'function': {
-              'name': 'get_weather',
-              'arguments': jsonEncode({'city': '北京'}),
-            },
-          }
-        ],
+    try {
+      final request = http.Request('POST', Uri.parse('$baseUrl/api/chat'));
+      request.headers['Content-Type'] = 'application/json';
+      request.body = jsonEncode({
+        'model': modelName,
+        'messages': messages,
+        'stream': true,
+        'options': {
+          if (temperature != null) 'temperature': temperature,
+          if (topP != null) 'top_p': topP,
+          'num_predict': maxTokens,
+        },
       });
-      await Future.delayed(const Duration(milliseconds: 100));
-      yield '\n$toolCallJson\n';
-    } else {
-      final response = _buildMockResponse(prompt);
-      for (int i = 0; i < response.length; i++) {
+
+      final streamedResp = await client.send(request).timeout(const Duration(seconds: 180));
+
+      await for (final chunk in streamedResp.stream.transform(utf8.decoder).transform(const LineSplitter())) {
         if (_stopRequested) break;
-        await Future.delayed(Duration(milliseconds: 25 + Random().nextInt(25)));
-        yield response[i];
+        if (chunk.trim().isEmpty) continue;
+
+        try {
+          final data = jsonDecode(chunk) as Map<String, dynamic>;
+          if (data['done'] == true) break;
+          final msg = data['message'] as Map<String, dynamic>?;
+          final content = msg?['content'] as String?;
+          if (content != null && content.isNotEmpty) {
+            yield content;
+          }
+        } catch (_) {
+          // 跳过解析错误的行
+          continue;
+        }
+      }
+    } on SocketException {
+      yield '\n\n⚠️ 无法连接到 Ollama。请确保:\n'
+          '1. Termux 中已运行: ollama serve\n'
+          '2. Ollama 正在监听端口 11434\n'
+          '3. 手机和 App 在同一设备上';
+    } on TimeoutException {
+      yield '\n\n⚠️ 请求超时，Ollama 推理时间过长。';
+    } catch (e) {
+      yield '\n\n⚠️ 发生错误: $e';
+    } finally {
+      client.close();
+      if (_activeClient == client) {
+        _activeClient = null;
       }
     }
   }
 
-  /// 构建 mock 回复文本
-  String _buildMockResponse(String prompt) {
-    if (prompt.isEmpty) {
-      return '您好！我是本地AI助手，基于llama.cpp推理。请问有什么可以帮助您的？';
-    }
-
-    if (prompt.contains('天气')) {
-      return '根据查询结果，北京今天晴，气温25-32°C，偏南风2-3级，空气质量良。适合户外活动。';
-    }
-
-    if (prompt.contains('代码') || prompt.contains('编程')) {
-      return '这是一个简单的 Dart 函数示例：\n\n'
-          '```dart\n'
-          'void greet(String name) {\n'
-          '  print("Hello, \$name!");\n'
-          '}\n'
-          '```\n\n'
-          '需要我解释这个函数的作用吗？';
-    }
-
-    if (prompt.length < 20) {
-      return '这是一个很好的问题！让我从多个角度为您分析...\n\n'
-          '首先，我们需要考虑上下文和实际应用场景。'
-          '基于当前信息，我建议从以下几个方面着手解决。';
-    }
-
-    return '已收到您的消息。作为本地AI助手，我正在使用llama.cpp进行推理。\n\n'
-        '当前模型：${currentConfig?.name ?? "未加载"}\n'
-        '（注：当前为 mock 推理模式，真实模型推理将在后续版本中启用）';
-  }
-
   // ---------------------------------------------------------------------------
-  // 构建输入文本（带聊天模板）
+  // 构建 Ollama API 的 messages 格式
   // ---------------------------------------------------------------------------
 
-  String _buildPromptText(
-    String prompt, {
-    List<Message>? history,
-  }) {
-    final buffer = StringBuffer();
+  List<Map<String, dynamic>> _buildMessages(String prompt, {List<Message>? history}) async {
+    final messages = <Map<String, dynamic>>[];
+
+    // 拼接记忆上下文
+    String memoryContext = '';
+    try {
+      if (memoryService != null) {
+        memoryContext = await memoryService!.buildMemoryContext(prompt);
+      }
+    } catch (_) {
+      // 记忆服务异常时静默跳过
+    }
 
     // 系统提示
-    buffer.writeln('<|system|>');
-    buffer.writeln('你是一个有帮助的AI助手，运行在本地设备上。');
-    buffer.writeln('请用中文回复用户的问题。');
-    buffer.writeln('</s>');
+    String systemPrompt = '你是一个有帮助的AI助手，运行在本地设备上，通过 Ollama 进行推理。'
+        '你可以使用工具来完成搜索、计算、文件读写等任务。请用中文回复。';
+
+    // 注入记忆上下文（长对话记忆 + 自我进化）
+    if (memoryContext.isNotEmpty) {
+      systemPrompt += '\n\n以下是我对你的了解（每次对话会自动学习和更新）：$memoryContext';
+    }
+
+    messages.add({
+      'role': 'system',
+      'content': systemPrompt,
+    });
 
     // 历史消息
     if (history != null) {
       for (final msg in history) {
         switch (msg.role) {
           case MessageRole.user:
-            buffer.writeln('<|user|>');
-            buffer.writeln(msg.content);
-            buffer.writeln('</s>');
+            messages.add({'role': 'user', 'content': msg.content});
             break;
           case MessageRole.assistant:
-            buffer.writeln('<|assistant|>');
-            buffer.writeln(msg.content);
-            buffer.writeln('</s>');
+            messages.add({'role': 'assistant', 'content': msg.content});
             break;
           default:
             break;
@@ -290,23 +272,22 @@ class LlamaCppService implements LlmService {
     }
 
     // 当前用户输入
-    buffer.writeln('<|user|>');
-    buffer.writeln(prompt);
-    buffer.writeln('</s>');
-    buffer.writeln('<|assistant|>');
+    messages.add({'role': 'user', 'content': prompt});
 
-    return buffer.toString();
+    return messages;
   }
 
   // ---------------------------------------------------------------------------
-  // 后续启用：真实 llama.cpp 推理（通过 dart:ffi 调用 libllama.so）
-  //
-  // 接入时需：
-  // 1. 导入 dart:ffi 和 package:ffi/ffi.dart
-  // 2. 添加 native 类型定义和函数绑定
-  // 3. 实现 _tokenize / _detokenize / _nativeGenerate
-  // 4. 在 pubspec.yaml 中添加 ffi: ^2.1.0
-  // 5. 将 libllama.so 放入 android/app/src/main/jniLibs/
-  // 详细实现参考注释掉的 _nativeGenerate / _tokenize / _detokenize 代码
+  // 工具方法
   // ---------------------------------------------------------------------------
+
+  /// 获取当前 Ollama 模型名称
+  String _getModelName() {
+    if (currentConfig != null && currentConfig!.filePath.isNotEmpty) {
+      // 从文件路径推断模型名
+      final name = currentConfig!.filePath.split('/').last.replaceAll('.gguf', '');
+      if (name.isNotEmpty) return name;
+    }
+    return 'qwen2.5:7b';
+  }
 }

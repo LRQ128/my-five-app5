@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/model_config.dart';
 import 'llm_service.dart';
+import 'memory_service.dart';
 
 // =============================================================================
 // ModelManager —— 多模型管理（单例）
@@ -26,6 +27,11 @@ class ModelManager {
   // ---------------------------------------------------------------------------
   static final ModelManager _instance = ModelManager._internal();
 
+  /// 注入记忆服务
+  void injectMemoryService(MemoryService service) {
+    _memoryService = service;
+  }
+
   factory ModelManager() => _instance;
 
   ModelManager._internal();
@@ -36,6 +42,7 @@ class ModelManager {
 
   /// 当前 LLM 服务实例
   LlmService? _llmService;
+  MemoryService? _memoryService;
 
   /// 当前选中的模型配置
   ModelConfig? _currentConfig;
@@ -101,7 +108,7 @@ class ModelManager {
     }
 
     // 初始化 LlmService
-    _llmService = LlamaCppService();
+    _llmService = OllamaService(memoryService: _memoryService);
 
     _initialized = true;
   }
