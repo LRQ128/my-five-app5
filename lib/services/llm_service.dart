@@ -1,14 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
-import 'package:http/http.dart' as http;
+import 'package:llamadart/llamadart.dart';
 import '../models/message.dart';
 import '../models/model_config.dart';
 import 'memory_service.dart';
 
 // =============================================================================
-// 抽象 LLM 服务接口
+// 抽象 LLM 服务接口（保持兼容）
 // =============================================================================
 
 abstract class LlmService {
@@ -23,27 +21,30 @@ abstract class LlmService {
 }
 
 // =============================================================================
-// Ollama 后端实现 — 通过 HTTP API 调用本地 Ollama 服务
+// llamadart 后端 — 完全本地推理，无需 Termux / Ollama
 // =============================================================================
 
-class OllamaService implements LlmService {
+class LlamaDartService implements LlmService {
   @override
   bool isModelLoaded = false;
 
   @override
   ModelConfig? currentConfig;
 
+  LlamaEngine? _engine;
   bool _stopRequested = false;
-  http.Client? _activeClient;
-  StreamSubscription? _activeSubscription;
 
-  /// Ollama 服务地址（手机本地，Ollama 默认监听 11434）
-  final String baseUrl;
-
-  /// 记忆服务（长对话记忆与自我进化）
+  /// 记忆服务（可选，用于注入对话上下文）
   final MemoryService? memoryService;
 
-  OllamaService({this.baseUrl = 'http://localhost:11434', this.memoryService});
+  /// 下载进度回调（用于 UI 显示）
+  final void Function(double progress)? onDownloadProgress;
+
+  LlamaDartService({this.memoryService, this.onDownloadProgress});
+
+  /// 默认模型源（HuggingFace GGUF）
+  static const String defaultModelSource =
+      'hf://Qwen/Qwen2.5-1.5B-Instruct-GGUF/qwen2.5-1.5b-instruct-q4_k_m.gguf';
 
   // ---------------------------------------------------------------------------
   // 模型加载 / 卸载
@@ -53,34 +54,45 @@ class OllamaService implements LlmService {
   Future<void> loadModel(ModelConfig config) async {
     if (isModelLoaded) await unloadModel();
 
-    // 校验 Ollama 服务是否可达
-    try {
-      final resp = await http.get(Uri.parse('$baseUrl/api/tags')).timeout(const Duration(seconds: 5));
-      if (resp.statusCode != 200) {
-        throw Exception('Ollama 服务不可用 (HTTP ${resp.statusCode})');
-      }
-    } on SocketException {
-      throw Exception('无法连接到 Ollama，请确保已在 Termux 中运行 ollama serve');
-    } on TimeoutException {
-      throw Exception('连接 Ollama 超时，请确认 Ollama 已启动');
-    }
-
-    isModelLoaded = true;
-    currentConfig = config;
     _stopRequested = false;
+
+    // 确定模型源
+    final modelSource = config.filePath.isNotEmpty
+        ? config.filePath  // 本地文件路径或 HF URL
+        : defaultModelSource;
+
+    // 初始化 llamadart 引擎
+    final backend = LlamaBackend();
+    _engine = LlamaEngine(backend);
+
+    try {
+      await _engine!.loadModelSource(
+        ModelSource.parse(modelSource),
+        params: ModelParams(
+          contextSize: config.contextSize,
+          gpuLayers: -1, // 自动 GPU 加速
+        ),
+      );
+      isModelLoaded = true;
+      currentConfig = config;
+    } catch (e) {
+      isModelLoaded = false;
+      _engine = null;
+      rethrow;
+    }
   }
 
   @override
   Future<void> unloadModel() async {
     _stopRequested = true;
-    await _activeSubscription?.cancel();
-    _activeClient?.close();
+    await _engine?.dispose();
+    _engine = null;
     isModelLoaded = false;
     currentConfig = null;
   }
 
   // ---------------------------------------------------------------------------
-  // 生成
+  // 生成（非流式）
   // ---------------------------------------------------------------------------
 
   @override
@@ -91,39 +103,37 @@ class OllamaService implements LlmService {
     double? temperature,
     double? topP,
   }) async {
-    final modelName = _getModelName();
+    if (_engine == null) return '⚠️ 模型未加载';
+
     final messages = await _buildMessages(prompt, history: history);
+    final output = StringBuffer();
 
     try {
-      final resp = await http.post(
-        Uri.parse('$baseUrl/api/chat'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'model': modelName,
-          'messages': messages,
-          'stream': false,
-          'options': {
-            if (temperature != null) 'temperature': temperature,
-            if (topP != null) 'top_p': topP,
-            'num_predict': maxTokens,
-          },
-        }),
-      ).timeout(const Duration(seconds: 120));
-
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        final msg = data['message'] as Map<String, dynamic>?;
-        return (msg?['content'] as String?) ?? '';
-      } else {
-        return '⚠️ Ollama 返回错误: ${resp.statusCode}\n${resp.body}';
+      await for (final chunk in _engine!.create(
+        messages,
+        params: GenerationParams(
+          maxTokens: maxTokens,
+          temperature: temperature ?? 0.7,
+          topP: topP ?? 0.9,
+        ),
+      )) {
+        if (_stopRequested) break;
+        final text = chunk.choices.first.delta.content;
+        if (text != null) {
+          output.write(text);
+        }
       }
     } catch (e) {
-      return '⚠️ 调用 Ollama 失败: $e\n\n'
-          '请确保已在 Termux 中运行:\n'
-          '  ollama serve\n'
-          '并已拉取模型: ollama pull qwen2.5:7b';
+      return '⚠️ 推理出错: $e';
     }
+
+    if (_stopRequested) return '';
+    return output.toString();
   }
+
+  // ---------------------------------------------------------------------------
+  // 流式生成
+  // ---------------------------------------------------------------------------
 
   @override
   Stream<String> streamGenerate(
@@ -133,7 +143,13 @@ class OllamaService implements LlmService {
     double? temperature,
     double? topP,
   }) {
-    return _streamChat(prompt, history: history, maxTokens: maxTokens, temperature: temperature, topP: topP);
+    return _createStream(
+      prompt,
+      history: history,
+      maxTokens: maxTokens,
+      temperature: temperature,
+      topP: topP,
+    );
   }
 
   @override
@@ -145,91 +161,71 @@ class OllamaService implements LlmService {
     double? temperature,
     double? topP,
   }) {
-    // 目前 Ollama 的 tool calling 支持有限，先走普通流式
-    return _streamChat(prompt, history: history, maxTokens: maxTokens, temperature: temperature, topP: topP);
+    return _createStream(
+      prompt,
+      history: history,
+      maxTokens: maxTokens,
+      temperature: temperature,
+      topP: topP,
+    );
   }
 
   @override
   void stop() {
     _stopRequested = true;
-    _activeSubscription?.cancel();
-    _activeClient?.close();
+    // llamadart 通过 dispose 停止，但这里我们只是标记
   }
 
   // ---------------------------------------------------------------------------
-  // 核心：流式对话
+  // 核心流式方法
   // ---------------------------------------------------------------------------
 
-  Stream<String> _streamChat(
+  Stream<String> _createStream(
     String prompt, {
     List<Message>? history,
     int maxTokens = 4096,
     double? temperature,
     double? topP,
   }) async* {
-    final modelName = _getModelName();
-    final messages = await _buildMessages(prompt, history: history);
+    if (_engine == null) {
+      yield '⚠️ 模型未加载';
+      return;
+    }
 
     _stopRequested = false;
-    http.Client client = http.Client();
-    _activeClient = client;
+    final messages = await _buildMessages(prompt, history: history);
 
     try {
-      final request = http.Request('POST', Uri.parse('$baseUrl/api/chat'));
-      request.headers['Content-Type'] = 'application/json';
-      request.body = jsonEncode({
-        'model': modelName,
-        'messages': messages,
-        'stream': true,
-        'options': {
-          if (temperature != null) 'temperature': temperature,
-          if (topP != null) 'top_p': topP,
-          'num_predict': maxTokens,
-        },
-      });
-
-      final streamedResp = await client.send(request).timeout(const Duration(seconds: 180));
-
-      await for (final chunk in streamedResp.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+      await for (final chunk in _engine!.create(
+        messages,
+        params: GenerationParams(
+          maxTokens: maxTokens,
+          temperature: temperature ?? 0.7,
+          topP: topP ?? 0.9,
+        ),
+      )) {
         if (_stopRequested) break;
-        if (chunk.trim().isEmpty) continue;
-
-        try {
-          final data = jsonDecode(chunk) as Map<String, dynamic>;
-          if (data['done'] == true) break;
-          final msg = data['message'] as Map<String, dynamic>?;
-          final content = msg?['content'] as String?;
-          if (content != null && content.isNotEmpty) {
-            yield content;
-          }
-        } catch (_) {
-          // 跳过解析错误的行
-          continue;
+        final text = chunk.choices.first.delta.content;
+        if (text != null && text.isNotEmpty) {
+          yield text;
         }
       }
-    } on SocketException {
-      yield '\n\n⚠️ 无法连接到 Ollama。请确保:\n'
-          '1. Termux 中已运行: ollama serve\n'
-          '2. Ollama 正在监听端口 11434\n'
-          '3. 手机和 App 在同一设备上';
-    } on TimeoutException {
-      yield '\n\n⚠️ 请求超时，Ollama 推理时间过长。';
     } catch (e) {
-      yield '\n\n⚠️ 发生错误: $e';
-    } finally {
-      client.close();
-      if (_activeClient == client) {
-        _activeClient = null;
-      }
+      yield '\n\n⚠️ 推理出错: $e\n\n'
+          '可能是模型下载未完成或内存不足。\n'
+          '请确认手机至少有 2GB 可用内存。';
     }
   }
 
   // ---------------------------------------------------------------------------
-  // 构建 Ollama API 的 messages 格式
+  // 构建消息历史
   // ---------------------------------------------------------------------------
 
-  Future<List<Map<String, dynamic>>> _buildMessages(String prompt, {List<Message>? history}) async {
-    final messages = <Map<String, dynamic>>[];
+  Future<List<LlamaChatMessage>> _buildMessages(
+    String prompt, {
+    List<Message>? history,
+  }) async {
+    final messages = <LlamaChatMessage>[];
 
     // 拼接记忆上下文
     String memoryContext = '';
@@ -237,57 +233,44 @@ class OllamaService implements LlmService {
       if (memoryService != null) {
         memoryContext = await memoryService!.buildMemoryContext(prompt);
       }
-    } catch (_) {
-      // 记忆服务异常时静默跳过
-    }
+    } catch (_) {}
 
     // 系统提示
-    String systemPrompt = '你是一个有帮助的AI助手，运行在本地设备上，通过 Ollama 进行推理。'
-        '你可以使用工具来完成搜索、计算、文件读写等任务。请用中文回复。';
-
-    // 注入记忆上下文（长对话记忆 + 自我进化）
+    String systemPrompt = '你是一个有帮助的AI助手，运行在本地设备上。'
+        '请用中文回复，回答简洁准确。';
     if (memoryContext.isNotEmpty) {
-      systemPrompt += '\n\n以下是我对你的了解（每次对话会自动学习和更新）：$memoryContext';
+      systemPrompt += '\n\n以下是我对你的了解：$memoryContext';
     }
 
-    messages.add({
-      'role': 'system',
-      'content': systemPrompt,
-    });
+    messages.add(LlamaChatMessage(
+      role: LlamaChatRole.system,
+      content: systemPrompt,
+    ));
 
     // 历史消息
     if (history != null) {
       for (final msg in history) {
+        LlamaChatRole role;
         switch (msg.role) {
           case MessageRole.user:
-            messages.add({'role': 'user', 'content': msg.content});
+            role = LlamaChatRole.user;
             break;
           case MessageRole.assistant:
-            messages.add({'role': 'assistant', 'content': msg.content});
+            role = LlamaChatRole.assistant;
             break;
           default:
-            break;
+            continue;
         }
+        messages.add(LlamaChatMessage(role: role, content: msg.content));
       }
     }
 
     // 当前用户输入
-    messages.add({'role': 'user', 'content': prompt});
+    messages.add(LlamaChatMessage(
+      role: LlamaChatRole.user,
+      content: prompt,
+    ));
 
     return messages;
-  }
-
-  // ---------------------------------------------------------------------------
-  // 工具方法
-  // ---------------------------------------------------------------------------
-
-  /// 获取当前 Ollama 模型名称
-  String _getModelName() {
-    if (currentConfig != null && currentConfig!.filePath.isNotEmpty) {
-      // 从文件路径推断模型名
-      final name = currentConfig!.filePath.split('/').last.replaceAll('.gguf', '');
-      if (name.isNotEmpty) return name;
-    }
-    return 'qwen2.5:7b';
   }
 }
