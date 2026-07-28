@@ -475,7 +475,7 @@ class AgentEngine {
     List<Message> currentMessages,
     List<dynamic> toolCalls,
     List<AgentToolBase> tools,
-  ) {
+  ) async {
     final newMessages = List<Message>.from(currentMessages);
 
     for (final tc in toolCalls) {
@@ -511,7 +511,7 @@ class AgentEngine {
           toolCallInfo = ToolCallInfo(
             id: callId,
             name: funcName,
-            arguments: funcArgs,
+            arguments: toolCallInfo.arguments,
             result: resultStr,
             status: ToolCallStatus.completed,
           );
