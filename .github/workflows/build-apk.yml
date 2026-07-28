@@ -26,23 +26,20 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Accept Android licenses
+      - name: Accept licenses
         run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses 2>&1 || true
           yes | flutter doctor --android-licenses 2>&1 || true
-          echo "Licenses accepted"
 
       - name: Save environment diagnostics
         run: |
           mkdir -p /tmp/diag
+          set +e
           flutter doctor -v > /tmp/diag/01_flutter_doctor.txt 2>&1
           echo "ANDROID_HOME=$ANDROID_HOME" > /tmp/diag/02_env.txt
           echo "JAVA_HOME=$JAVA_HOME" >> /tmp/diag/02_env.txt
           flutter --version >> /tmp/diag/02_env.txt
-
-      - name: Accept Android licenses (final)
-        run: |
-          yes | flutter doctor --android-licenses 2>&1 || true
-          echo "Done"
+          cat /tmp/diag/01_flutter_doctor.txt | grep -i "error\|warning\|✗" > /tmp/diag/01_issues.txt 2>&1 || true
 
       - name: Generate Android project with flutter create
         run: |
@@ -64,8 +61,12 @@ jobs:
           cat android/app/src/main/AndroidManifest.xml > /tmp/diag/06_manifest.txt
           find android/ -name '*.gradle' -o -name '*.xml' -o -name '*.properties' -o -name '*.kt' > /tmp/diag/07_android_files.txt
 
+
       - name: Flutter pub get
         run: flutter pub get 2>&1 | tee /tmp/diag/08_pub_get.txt
+
+      - name: Check .flutter-plugins
+        run: cat .flutter-plugins-dependencies > /tmp/diag/08_plugins.txt 2>&1 || echo "no plugins" > /tmp/diag/08_plugins.txt
 
       - name: Generate keystore
         run: |
@@ -81,6 +82,16 @@ jobs:
         run: |
           flutter build apk --release 2>&1 | tee /tmp/diag/09_build_log.txt
           exit ${PIPESTATUS[0]}
+
+      - name: Show build log in summary
+        if: failure()
+        run: |
+          echo "## 🔴 Build Failed" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -50 /tmp/diag/09_build_log.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          tail -50 /tmp/diag/pub_get_log.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/diag/*.txt | grep -i "error\|failed\|embedding\|Could not" | head -10 >> $GITHUB_STEP_SUMMARY || true
 
       - name: Upload diagnostics (always)
         if: always()
