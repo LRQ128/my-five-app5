@@ -22,7 +22,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.4'
+          flutter-version: '3.24.0'
           channel: 'stable'
           cache: true
 
@@ -39,8 +39,11 @@ jobs:
             -keypass localai123456 \
             -dname "CN=LocalAI, OU=Dev, O=Personal, L=BJ, ST=BJ, C=CN"
 
+      - name: Flutter clean
+        run: flutter clean
+
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --target-platform android-arm64
 
       - name: Sign APK with apksigner (v1+v2+v3)
         run: |
