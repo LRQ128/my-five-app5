@@ -8,32 +8,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:3.24.0
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.24.0'
-          channel: 'stable'
-          cache: true
-
-      - name: Flutter doctor
-        run: flutter doctor -v
-
-      - name: Regenerate Android project
-        run: |
-          rm -rf android/app/src/main/kotlin
-          flutter create --platforms=android --project-name local_ai_assistant . --force 2>/dev/null || true
-          cat android/app/build.gradle
 
       - name: Flutter pub get
         run: flutter pub get
@@ -48,15 +28,14 @@ jobs:
             -keypass localai123456 \
             -dname "CN=LocalAI, OU=Dev, O=Personal, L=BJ, ST=BJ, C=CN"
 
-      - name: Flutter clean
-        run: flutter clean
-
       - name: Build APK
         run: flutter build apk --release --target-platform android-arm64
 
-      - name: Sign APK with apksigner (v1+v2+v3)
+      - name: Sign APK with apksigner
         run: |
-          $ANDROID_HOME/build-tools/35.0.0/apksigner sign \
+          ANDROID_SDK_ROOT="$ANDROID_HOME"
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/\$(ls $ANDROID_SDK_ROOT/build-tools/)/apksigner"
+          "\$APKSIGNER" sign \
             --ks android/app/release.jks \
             --ks-key-alias local-ai-assistant \
             --ks-pass pass:localai123456 \
@@ -68,8 +47,8 @@ jobs:
 
       - name: Verify signature
         run: |
-          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose \
-            build/app/outputs/flutter-apk/app-release.apk
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/\$(ls $ANDROID_SDK_ROOT/build-tools/)/apksigner"
+          "\$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -78,24 +57,10 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Release v1.0.${{ github.run_number }}
-          body: |
-            ## 本地AI助手 - APK Release
-            
-            **Build**: #${{ github.run_number }}
-            **Commit**: ${{ github.sha }}
-            
-            ### 功能
-            - llama.cpp 本地大模型推理 (Qwen2.5-7B-Q4_K_M)
-            - Agent引擎 + 工具调用
-            - 多模型热切换 (7B/14B)
-            - 联网搜索/计算器/天气/备忘录
-            - OpenClaw风格聊天界面
-            
           files: build/app/outputs/flutter-apk/app-release.apk
           draft: false
           prerelease: false
