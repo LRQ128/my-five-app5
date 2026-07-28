@@ -45,7 +45,6 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
       // 4. 初始化Agent引擎（先传null，等模型加载后设置）
       agentEngine = AgentEngine(
         llmService: null,
-        toolRegistry: toolRegistry,
       );
 
       setState(() {
