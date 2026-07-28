@@ -28,18 +28,21 @@ jobs:
       - name: Accept licenses
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Flutter create
+      - name: Build libllama.so (Android native)
         run: |
-          flutter clean 2>&1 || true
-          rm -rf android/
-          flutter create --platforms=android --project-name=local_ai_assistant .
+          git clone --depth=1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp
+          cd /tmp/llama.cpp
+          mkdir build && cd build
+          cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON             -DLLAMA_CUDA=OFF -DLLAMA_METAL=OFF -DLLAMA_VULKAN=OFF             -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF             ..
+          cmake --build . --target llama -j$(nproc)
+          find . -name "libllama.so" -exec cp {} ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/ \;
+          ls -lh ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/libllama.so
+
+      - name: Apply Android config
+        run: |
           mkdir -p assets/models/ fonts/
           touch assets/models/.gitkeep fonts/.gitkeep
-
-      - name: Apply config
-        run: |
-          sed -i 's|minSdk = flutter\.minSdkVersion|minSdk 26|' android/app/build.gradle
-          cp android_config/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          sed -i 's|minSdk = flutter\.minSdkVersion|minSdk 26|' android/app/build.gradle || true
 
       - name: Pub get
         run: flutter pub get

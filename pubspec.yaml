@@ -23,6 +23,9 @@ dependencies:
   # 网络
   http: ^1.2.1
 
+  # 本地AI推理（llama.cpp Dart绑定）
+  llama_cpp_dart: ^0.2.2
+
   # 工具
   intl: ^0.19.0
   uuid: ^4.3.3

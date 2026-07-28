@@ -108,7 +108,7 @@ class ModelManager {
     }
 
     // 初始化 LlmService
-    _llmService = OllamaService(memoryService: _memoryService);
+    _llmService = LlamaCppService(memoryService: _memoryService);
 
     _initialized = true;
   }
