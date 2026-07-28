@@ -165,11 +165,6 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
       );
     }
 
-    return ChatPage(
-      modelManager: modelManager,
-      conversationService: conversationService,
-      agentEngine: agentEngine,
-      toolRegistry: toolRegistry,
-    );
+    return ChatPage();
   }
 }

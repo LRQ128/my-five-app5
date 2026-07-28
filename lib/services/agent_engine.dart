@@ -97,8 +97,8 @@ abstract class AgentToolBase {
 /// 4. 执行工具并将结果注入对话
 /// 5. 循环直到模型直接回复（最多 5 轮工具调用）
 class AgentEngine {
-  /// LLM 服务实例（可动态替换）
-  LlmService llmService;
+  /// LLM 服务实例（可动态替换，null 表示还未绑定）
+  LlmService? llmService;
 
   /// 最大工具调用回合数（防止死循环）
   final int maxToolCallRounds;
@@ -110,7 +110,7 @@ class AgentEngine {
   bool _stopRequested = false;
 
   AgentEngine({
-    required this.llmService,
+    this.llmService,
     this.maxToolCallRounds = 5,
   });
 
@@ -164,7 +164,16 @@ class AgentEngine {
         final responseBuffer = StringBuffer();
         bool hasToolCalls = false;
 
-        await for (final token in llmService.generateWithTools(
+        final service = llmService;
+        if (service == null) {
+          yield AgentEvent(
+            type: AgentEventType.error,
+            data: 'LLM 服务未初始化',
+          );
+          break;
+        }
+
+        await for (final token in service.generateWithTools(
           promptText,
           history: currentMessages,
           tools: toolsList,
@@ -301,7 +310,7 @@ class AgentEngine {
   /// 停止当前执行
   void stop() {
     _stopRequested = true;
-    llmService.stop();
+    llmService?.stop();
   }
 
   // ---------------------------------------------------------------------------
@@ -476,7 +485,7 @@ class AgentEngine {
       final callId = tc['id'] as String;
 
       // 构造 assistant 消息（含 tool_calls）
-      final toolCallInfo = ToolCallInfo(
+      var toolCallInfo = ToolCallInfo(
         id: callId,
         name: funcName,
         arguments: jsonDecode(funcArgsStr) as Map<String, dynamic>,
@@ -502,7 +511,7 @@ class AgentEngine {
           toolCallInfo = ToolCallInfo(
             id: callId,
             name: funcName,
-            arguments: toolCallInfo.arguments,
+            arguments: funcArgs,
             result: resultStr,
             status: ToolCallStatus.completed,
           );

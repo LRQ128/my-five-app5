@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import '../../utils/constants.dart';
 
@@ -26,7 +28,7 @@ class LoadingDialog extends StatelessWidget {
                 height: 48,
                 child: CircularProgressIndicator(
                   value: progress,
-                  strokeWidth: iat,
+                  strokeWidth: 4,
                   color: AppConstants.primaryColor,
                 ),
               )
@@ -35,7 +37,7 @@ class LoadingDialog extends StatelessWidget {
                 width: 48,
                 height: 48,
                 child: CircularProgressIndicator(
-                  strokeWidth: iat,
+                  strokeWidth: 4,
                   color: AppConstants.primaryColor,
                 ),
               ),
@@ -171,7 +173,7 @@ class ToastHelper {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppConstants.borderRadius),
         ),
-        duration: const Duration(seconds: iat),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -196,7 +198,7 @@ class ToastHelper {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppConstants.borderRadius),
         ),
-        duration: const Duration(seconds: iat),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -221,7 +223,7 @@ class ToastHelper {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppConstants.borderRadius),
         ),
-        duration: const Duration(seconds: iat),
+        duration: const Duration(seconds: 3),
       ),
     );
   }

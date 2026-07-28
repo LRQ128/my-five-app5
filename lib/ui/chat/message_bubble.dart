@@ -443,7 +443,6 @@ class MessageBubble extends StatelessWidget {
                           child: SelectableText(
                             toolCall.result!,
                             maxLines: 10,
-                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: AppConstants.textPrimary.withOpacity(0.8),
                               fontSize: 12,

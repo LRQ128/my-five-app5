@@ -24,7 +24,7 @@ class ModelConfig {
     this.topP = 0.9,
     this.threads = 4,
     this.isDefault = false,
-    this.modelSize = 7_000_000_000,
+    this.modelSize = 7000000000,
     this.quantization = 'Q4_K_M',
   });
 
@@ -84,17 +84,17 @@ class ModelConfig {
         topP: (map['topP'] as num?)?.toDouble() ?? 0.9,
         threads: (map['threads'] as num?)?.toInt() ?? 4,
         isDefault: (map['isDefault'] as bool?) ?? false,
-        modelSize: (map['modelSize'] as num?)?.toInt() ?? 7_000_000_000,
+        modelSize: (map['modelSize'] as num?)?.toInt() ?? 7000000000,
         quantization: (map['quantization'] as String?) ?? 'Q4_K_M',
       );
 
   /// 模型大小标签
   String get sizeLabel {
-    if (modelSize >= 70_000_000_000) return '70B';
-    if (modelSize >= 30_000_000_000) return '30B';
-    if (modelSize >= 13_000_000_000) return '14B';
-    if (modelSize >= 7_000_000_000) return '7B';
-    if (modelSize >= 3_000_000_000) return '3B';
+    if (modelSize >= 70000000000) return '70B';
+    if (modelSize >= 30000000000) return '30B';
+    if (modelSize >= 13000000000) return '14B';
+    if (modelSize >= 7000000000) return '7B';
+    if (modelSize >= 3000000000) return '3B';
     return '1.5B';
   }
 
@@ -105,7 +105,7 @@ class ModelConfig {
       name: 'Qwen2.5-7B-Q4_K_M',
       filePath: 'qwen2.5-7b-q4_k_m.gguf',
       description: '阿里通义千问2.5 7B版，Q4量化，约4.5GB内存',
-      modelSize: 7_000_000_000,
+      modelSize: 7000000000,
       quantization: 'Q4_K_M',
       isDefault: true,
     ),
@@ -114,7 +114,7 @@ class ModelConfig {
       name: 'Qwen2.5-14B-Q4_K_M',
       filePath: 'qwen2.5-14b-q4_k_m.gguf',
       description: '阿里通义千问2.5 14B版，Q4量化，约8.5GB内存',
-      modelSize: 14_000_000_000,
+      modelSize: 14000000000,
       quantization: 'Q4_K_M',
     ),
     ModelConfig(
@@ -122,7 +122,7 @@ class ModelConfig {
       name: 'Qwen2.5-7B-Q8_0',
       filePath: 'qwen2.5-7b-q8_0.gguf',
       description: '阿里通义千问2.5 7B版，Q8量化，约7GB内存',
-      modelSize: 7_000_000_000,
+      modelSize: 7000000000,
       quantization: 'Q8_0',
     ),
     ModelConfig(
@@ -130,7 +130,7 @@ class ModelConfig {
       name: 'Llama-3.2-3B-Q4_K_M',
       filePath: 'llama-3.2-3b-q4_k_m.gguf',
       description: 'Meta Llama 3.2 3B版，Q4量化，约2GB内存',
-      modelSize: 3_000_000_000,
+      modelSize: 3000000000,
       quantization: 'Q4_K_M',
     ),
   ];

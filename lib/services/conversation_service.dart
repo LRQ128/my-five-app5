@@ -58,9 +58,7 @@ class ConversationService {
   // 构造函数 & 数据库初始化
   // ---------------------------------------------------------------------------
 
-  ConversationService() {
-    _initDatabase();
-  }
+  ConversationService();
 
   /// 初始化数据库（异步完成，不阻塞构造）
   Future<void> _initDatabase() async {
@@ -349,7 +347,8 @@ class ConversationService {
       'SELECT COUNT(*) as count FROM $_tableMessages WHERE $_colMsgConversationId = ?',
       [conversationId],
     );
-    return sqflite.firstIntValue(result) ?? 0;
+    final first = result.first['count'] as int?;
+    return first ?? 0;
   }
 
   /// 清空对话的所有消息
@@ -420,6 +419,11 @@ class ConversationService {
   // ---------------------------------------------------------------------------
   // 释放资源
   // ---------------------------------------------------------------------------
+
+  /// 初始化服务（等待数据库就绪）
+  Future<void> initialize() async {
+    await _initDatabase();
+  }
 
   /// 关闭数据库连接
   Future<void> close() async {
