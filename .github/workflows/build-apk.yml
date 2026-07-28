@@ -42,6 +42,21 @@ jobs:
           # 更新 app/build.gradle minSdk
           sed -i 's|minSdk [0-9]*|minSdk 26|' android/app/build.gradle
 
+      - name: Verify Flutter environment
+        run: |
+          flutter doctor -v
+          echo "--- Android dir ---"
+          ls -la android/app/src/main/
+
+      - name: Verify Android project
+        run: |
+          # 先创建一个测试项目验证环境正常
+          mkdir -p /tmp/test_flutter
+          cd /tmp/test_flutter
+          flutter create --platforms android test_app --org com.test 2>&1 | tail -3
+          cd test_app
+          flutter build apk --release 2>&1 | tail -5 || echo "TEST BUILD FAILED"
+
       - name: Flutter pub get
         run: flutter pub get
 
