@@ -8,12 +8,39 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/cirruslabs/flutter:3.24.0
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Delete old Android config & regenerate
+        run: |
+          rm -rf android/
+          flutter create --platforms android --project-name local_ai_assistant --force .
+          # 恢复我们的 AndroidManifest.xml 自定义内容（权限等）
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            # 添加自定义权限
+            sed -i 's|<uses-permission android:name="android.permission.INTERNET"/>|\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />|' android/app/src/main/AndroidManifest.xml
+            # 添加 largeHeap
+            sed -i 's|<application|<application\n        android:largeHeap="true"|' android/app/src/main/AndroidManifest.xml
+            # 更新 label
+            sed -i 's|android:label="local_ai_assistant"|android:label="本地智能助手"|' android/app/src/main/AndroidManifest.xml
+          fi
+          # 更新 app/build.gradle minSdk
+          sed -i 's|minSdk [0-9]*|minSdk 26|' android/app/build.gradle
 
       - name: Flutter pub get
         run: flutter pub get
@@ -29,13 +56,11 @@ jobs:
             -dname "CN=LocalAI, OU=Dev, O=Personal, L=BJ, ST=BJ, C=CN"
 
       - name: Build APK
-        run: flutter build apk --release --target-platform android-arm64
+        run: flutter build apk --release
 
       - name: Sign APK with apksigner
         run: |
-          ANDROID_SDK_ROOT="$ANDROID_HOME"
-          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/\$(ls $ANDROID_SDK_ROOT/build-tools/)/apksigner"
-          "\$APKSIGNER" sign \
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools/)/apksigner sign \
             --ks android/app/release.jks \
             --ks-key-alias local-ai-assistant \
             --ks-pass pass:localai123456 \
@@ -47,8 +72,8 @@ jobs:
 
       - name: Verify signature
         run: |
-          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/\$(ls $ANDROID_SDK_ROOT/build-tools/)/apksigner"
-          "\$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/app-release.apk
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools/)/apksigner verify \
+            --verbose build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
