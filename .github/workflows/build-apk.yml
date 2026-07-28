@@ -26,39 +26,36 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Delete old Android config & regenerate
+      - name: Save environment diagnostics
+        run: |
+          mkdir -p /tmp/diag
+          flutter doctor -v > /tmp/diag/01_flutter_doctor.txt 2>&1
+          echo "ANDROID_HOME=$ANDROID_HOME" > /tmp/diag/02_env.txt
+          echo "JAVA_HOME=$JAVA_HOME" >> /tmp/diag/02_env.txt
+          flutter --version >> /tmp/diag/02_env.txt
+
+      - name: Generate Android project with flutter create
         run: |
           rm -rf android/
           flutter create --platforms android --project-name local_ai_assistant --force .
-          # 恢复我们的 AndroidManifest.xml 自定义内容（权限等）
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            # 添加自定义权限
-            sed -i 's|<uses-permission android:name="android.permission.INTERNET"/>|\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />|' android/app/src/main/AndroidManifest.xml
-            # 添加 largeHeap
-            sed -i 's|<application|<application\n        android:largeHeap="true"|' android/app/src/main/AndroidManifest.xml
-            # 更新 label
-            sed -i 's|android:label="local_ai_assistant"|android:label="本地智能助手"|' android/app/src/main/AndroidManifest.xml
-          fi
-          # 更新 app/build.gradle minSdk
+          # Apply custom Android config
           sed -i 's|minSdk [0-9]*|minSdk 26|' android/app/build.gradle
+          # Customize AndroidManifest
+          manifest="android/app/src/main/AndroidManifest.xml"
+          sed -i 's|<uses-permission android:name="android.permission.INTERNET"/>|\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />|' "$manifest"
+          sed -i 's|<application|<application\n        android:largeHeap="true"|' "$manifest"
+          sed -i 's|android:label="local_ai_assistant"|android:label="本地智能助手"|' "$manifest"
 
-      - name: Verify Flutter environment
+      - name: Save generated Android config
         run: |
-          flutter doctor -v
-          echo "--- Android dir ---"
-          ls -la android/app/src/main/
-
-      - name: Verify Android project
-        run: |
-          # 先创建一个测试项目验证环境正常
-          mkdir -p /tmp/test_flutter
-          cd /tmp/test_flutter
-          flutter create --platforms android test_app --org com.test 2>&1 | tail -3
-          cd test_app
-          flutter build apk --release 2>&1 | tail -5 || echo "TEST BUILD FAILED"
+          cat android/app/build.gradle > /tmp/diag/03_app_build.gradle.txt
+          cat android/settings.gradle > /tmp/diag/04_settings.gradle.txt
+          cat android/build.gradle > /tmp/diag/05_project_build.gradle.txt
+          cat android/app/src/main/AndroidManifest.xml > /tmp/diag/06_manifest.txt
+          find android/ -name '*.gradle' -o -name '*.xml' -o -name '*.properties' -o -name '*.kt' > /tmp/diag/07_android_files.txt
 
       - name: Flutter pub get
-        run: flutter pub get
+        run: flutter pub get 2>&1 | tee /tmp/diag/08_pub_get.txt
 
       - name: Generate keystore
         run: |
@@ -71,10 +68,21 @@ jobs:
             -dname "CN=LocalAI, OU=Dev, O=Personal, L=BJ, ST=BJ, C=CN"
 
       - name: Build APK
-        run: flutter build apk --release
-
-      - name: Sign APK with apksigner
         run: |
+          flutter build apk --release 2>&1 | tee /tmp/diag/09_build_log.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload diagnostics (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics
+          path: /tmp/diag/
+
+      - name: Sign APK
+        if: success()
+        run: |
+          APK="build/app/outputs/flutter-apk/app-release.apk"
           $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools/)/apksigner sign \
             --ks android/app/release.jks \
             --ks-key-alias local-ai-assistant \
@@ -83,20 +91,23 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            build/app/outputs/flutter-apk/app-release.apk
+            "$APK"
 
       - name: Verify signature
+        if: success()
         run: |
           $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools/)/apksigner verify \
             --verbose build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Upload APK Artifact
+      - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-release-signed
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Create Release
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
