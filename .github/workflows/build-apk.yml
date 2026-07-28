@@ -45,7 +45,16 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release 2>&1 | tee /tmp/build_log.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload build log (on failure)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build_log
+          path: /tmp/build_log.txt
 
       - name: Sign APK
         run: |

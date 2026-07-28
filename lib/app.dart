@@ -37,6 +37,9 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
       toolRegistry = ToolRegistry();
       toolRegistry.registerDefaults();
 
+      // 2. 初始化模型管理器
+      modelManager = ModelManager();
+
       // 2a. 初始化记忆服务
       memoryService = MemoryService();
       await memoryService.init();
