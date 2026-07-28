@@ -1,0 +1,24 @@
+# Flutter generated
+.idea/
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+*.lock
+*.log
+.metadata
+android/local.properties
+android/.gradle/
+android/key.properties
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models
+assets/models/*.gguf
