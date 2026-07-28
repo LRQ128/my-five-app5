@@ -53,10 +53,10 @@ jobs:
 
       - name: Step 4 - flutter create
         run: |
-          flutter create --platforms=android --project-name=local_ai_assistant --force . 2>&1 | tee /tmp/flutter_create.log
-          echo "--- exit code: $? ---"
-          ls -la android/ 2>&1 || echo "ANDROID DIR MISSING"
-          ls android/app/src/main/AndroidManifest.xml 2>&1 || echo "MANIFEST MISSING"
+          flutter create --platforms=android --project-name=local_ai_assistant --force . 2>&1 | tee /tmp/diag/04_flutter_create.txt
+          echo "--- exit code: $? ---" | tee -a /tmp/diag/04_flutter_create.txt
+          ls -la android/ 2>&1 | tee -a /tmp/diag/04_flutter_create.txt
+          ls android/app/src/main/AndroidManifest.xml 2>&1 | tee -a /tmp/diag/04_flutter_create.txt
           echo "STEP4_OK" >> /tmp/step_status.txt
 
       - name: Step 4b - Apply custom config
@@ -118,7 +118,8 @@ jobs:
           cat /tmp/diag/09_build_log.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No build log" >> /tmp/error_log/build_failure.md
           cat /tmp/diag/08_pub_get.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No pub get log" >> /tmp/error_log/build_failure.md
           echo '```' >> /tmp/error_log/build_failure.md
-          cat /tmp/diag/*.txt 2>/dev/null | grep -i "error\|failed\|embedding\|Could not\|✗" | head -20 >> /tmp/error_log/build_failure.md || true
+          cat /tmp/step_status.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No step status" >> /tmp/error_log/build_failure.md
+          cat /tmp/diag/*.txt 2>/dev/null | grep -i "error\|failed\|embedding\|Could not\|✗" | head -10 >> /tmp/error_log/build_failure.md || true
           echo "Log saved to /tmp/error_log/build_failure.md"
 
       - name: Commit error log to repo
