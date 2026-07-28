@@ -58,23 +58,23 @@ class LlamaCppService implements LlmService {
     // 设置 .so 路径
     Llama.libraryPath = _libName;
 
+    final modelParams = ModelParams()
+      ..nGpuLayers = -1; // 自动 GPU 加速
+    final contextParams = ContextParams()
+      ..nCtx = config.contextSize;
+    final samplerParams = SamplerParams()
+      ..temp = config.temperature
+      ..topP = config.topP;
+
     final loadCommand = LlamaLoad(
       path: modelPath,
-      modelParams: ModelParams(
-        nGpuLayers: -1, // 自动 GPU 加速
-      ),
-      contextParams: ContextParams(
-        nCtx: config.contextSize,
-      ),
-      samplingParams: SamplerParams(
-        temp: config.temperature,
-        topP: config.topP,
-      ),
-      format: ChatMLFormat(),
+      modelParams: modelParams,
+      contextParams: contextParams,
+      samplingParams: samplerParams,
     );
 
     try {
-      _llamaParent = LlamaParent(loadCommand);
+      _llamaParent = LlamaParent(loadCommand, ChatMLFormat());
       await _llamaParent!.init();
       isModelLoaded = true;
       currentConfig = config;
