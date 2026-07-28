@@ -22,9 +22,14 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
+          flutter-version: '3.27.4'
           channel: 'stable'
           cache: true
+
+      - name: Accept Android licenses
+        run: |
+          yes | flutter doctor --android-licenses 2>&1 || true
+          echo "Licenses accepted"
 
       - name: Save environment diagnostics
         run: |
@@ -33,6 +38,11 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME" > /tmp/diag/02_env.txt
           echo "JAVA_HOME=$JAVA_HOME" >> /tmp/diag/02_env.txt
           flutter --version >> /tmp/diag/02_env.txt
+
+      - name: Accept Android licenses (final)
+        run: |
+          yes | flutter doctor --android-licenses 2>&1 || true
+          echo "Done"
 
       - name: Generate Android project with flutter create
         run: |
