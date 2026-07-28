@@ -83,15 +83,31 @@ jobs:
           flutter build apk --release 2>&1 | tee /tmp/diag/09_build_log.txt
           exit ${PIPESTATUS[0]}
 
-      - name: Show build log in summary
+      - name: Save error log to repo on failure
         if: failure()
         run: |
-          echo "## 🔴 Build Failed" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -50 /tmp/diag/09_build_log.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
-          tail -50 /tmp/diag/pub_get_log.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat /tmp/diag/*.txt | grep -i "error\|failed\|embedding\|Could not" | head -10 >> $GITHUB_STEP_SUMMARY || true
+          mkdir -p /tmp/error_log
+          echo "Build failed at $(date -u)" > /tmp/error_log/build_failure.md
+          echo "" >> /tmp/error_log/build_failure.md
+          echo "## Run #${{ github.run_number }}" >> /tmp/error_log/build_failure.md
+          echo "Commit: ${{ github.sha }}" >> /tmp/error_log/build_failure.md
+          echo "" >> /tmp/error_log/build_failure.md
+          echo '```' >> /tmp/error_log/build_failure.md
+          cat /tmp/diag/09_build_log.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No build log" >> /tmp/error_log/build_failure.md
+          cat /tmp/diag/08_pub_get.txt >> /tmp/error_log/build_failure.md 2>/dev/null || echo "No pub get log" >> /tmp/error_log/build_failure.md
+          echo '```' >> /tmp/error_log/build_failure.md
+          cat /tmp/diag/*.txt 2>/dev/null | grep -i "error\|failed\|embedding\|Could not\|✗" | head -20 >> /tmp/error_log/build_failure.md || true
+          echo "Log saved to /tmp/error_log/build_failure.md"
+
+      - name: Commit error log to repo
+        if: failure()
+        run: |
+          cp /tmp/error_log/build_failure.md ./build_failure_${{ github.run_number }}.md
+          git config user.name "CI Bot"
+          git config user.email "ci@local-ai-assistant"
+          git add ./build_failure_${{ github.run_number }}.md
+          git commit -m "build failure log for run #${{ github.run_number }}"
+          git push origin HEAD:master 2>&1 || echo "Push failed (expected if another build is running)"
 
       - name: Upload diagnostics (always)
         if: always()
