@@ -29,8 +29,8 @@ jobs:
       - name: Flutter doctor
         run: flutter doctor -v
 
-      - name: Accept Android licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+      - name: Regenerate Android project
+        run: flutter create --platforms=android --project-name local_ai_assistant . 2>/dev/null || true
 
       - name: Flutter pub get
         run: flutter pub get
