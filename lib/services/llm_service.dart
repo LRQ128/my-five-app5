@@ -228,7 +228,7 @@ class OllamaService implements LlmService {
   // 构建 Ollama API 的 messages 格式
   // ---------------------------------------------------------------------------
 
-  List<Map<String, dynamic>> _buildMessages(String prompt, {List<Message>? history}) async {
+  Future<List<Map<String, dynamic>>> _buildMessages(String prompt, {List<Message>? history}) async {
     final messages = <Map<String, dynamic>>[];
 
     // 拼接记忆上下文
