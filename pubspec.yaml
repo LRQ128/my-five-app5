@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.10.7 <4.0.0'
+  sdk: '>=3.2.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -20,11 +20,8 @@ dependencies:
   path_provider: ^2.1.2
   shared_preferences: ^2.2.2
 
-  # 网络（工具模块使用）
+  # 网络
   http: ^1.2.1
-
-  # 本地AI推理（内置模型下载）
-  llamadart: ^0.8.17
 
   # 工具
   intl: ^0.19.0

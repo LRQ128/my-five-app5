@@ -108,7 +108,7 @@ class ModelManager {
     }
 
     // 初始化 LlmService
-    _llmService = LlamaDartService(memoryService: _memoryService);
+    _llmService = OllamaService(memoryService: _memoryService);
 
     _initialized = true;
   }

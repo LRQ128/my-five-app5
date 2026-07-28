@@ -3,6 +3,7 @@ import 'ui/chat/chat_page.dart';
 import 'services/model_manager.dart';
 import 'services/conversation_service.dart';
 import 'services/agent_engine.dart';
+import 'services/llm_service.dart';
 import 'services/memory_service.dart';
 import 'tools/tool_registry.dart';
 import 'utils/constants.dart';
