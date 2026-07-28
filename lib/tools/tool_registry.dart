@@ -36,6 +36,15 @@ class ToolRegistry {
 
   /// 注册默认内置工具
   void _registerDefaults() {
+    _doRegisterDefaults();
+  }
+
+  /// 注册默认内置工具（公开版本，供外部调用）
+  void registerDefaults() {
+    _doRegisterDefaults();
+  }
+
+  void _doRegisterDefaults() {
     register(WebSearchTool());
     register(CalculatorTool());
     register(WeatherTool());
