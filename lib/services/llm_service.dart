@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:llama_cpp_dart/llama_cpp_dart.dart';
+import 'package:llama_cpp_dart/llama_cpp_dart.dart' hide Message;
 import '../models/message.dart';
 import '../models/model_config.dart';
 import 'memory_service.dart';
