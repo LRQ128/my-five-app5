@@ -92,7 +92,7 @@ class OllamaService implements LlmService {
     double? topP,
   }) async {
     final modelName = _getModelName();
-    final messages = _buildMessages(prompt, history: history);
+    final messages = await _buildMessages(prompt, history: history);
 
     try {
       final resp = await http.post(
@@ -168,7 +168,7 @@ class OllamaService implements LlmService {
     double? topP,
   }) async* {
     final modelName = _getModelName();
-    final messages = _buildMessages(prompt, history: history);
+    final messages = await _buildMessages(prompt, history: history);
 
     _stopRequested = false;
     http.Client client = http.Client();
