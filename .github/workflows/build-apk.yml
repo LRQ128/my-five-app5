@@ -53,7 +53,7 @@ jobs:
 
       - name: Step 4 - flutter create
         run: |
-          flutter create --platforms=android --project-name=local_ai_assistant --force . 2>&1 | tee /tmp/diag/04_flutter_create.txt
+          flutter create --platforms=android --project-name=local_ai_assistant . 2>&1 | tee /tmp/diag/04_flutter_create.txt
           echo "--- exit code: $? ---" | tee -a /tmp/diag/04_flutter_create.txt
           ls -la android/ 2>&1 | tee -a /tmp/diag/04_flutter_create.txt
           ls android/app/src/main/AndroidManifest.xml 2>&1 | tee -a /tmp/diag/04_flutter_create.txt
