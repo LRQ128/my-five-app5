@@ -28,18 +28,12 @@ jobs:
       - name: Accept licenses
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Flutter create
+      - name: Prepare
         run: |
-          flutter clean 2>&1 || true
-          rm -rf android/
-          flutter create --platforms=android --project-name=local_ai_assistant .
           mkdir -p assets/models/ fonts/
           touch assets/models/.gitkeep fonts/.gitkeep
-
-      - name: Apply config
-        run: |
-          sed -i 's|minSdk = flutter\.minSdkVersion|minSdk 26|' android/app/build.gradle
-          cp android_config/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          sed -i 's|minSdk = flutter\.minSdkVersion|minSdk 26|' android/app/build.gradle || true
+          echo "Android SDK config patched"
 
       - name: Pub get
         run: flutter pub get
