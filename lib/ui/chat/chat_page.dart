@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/message.dart';
 import '../../utils/constants.dart';
+import '../settings/settings_page.dart';
 import 'chat_input.dart';
 import 'message_bubble.dart';
 import 'thinking_indicator.dart';
@@ -186,7 +187,7 @@ class _ChatPageState extends State<ChatPage> {
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => const _SettingsPagePlaceholder(),
+        builder: (context) => const SettingsPage(),
       ),
     );
   }
@@ -406,29 +407,4 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-/// 设置页面占位器（实际导航到 SettingsPage）
-class _SettingsPagePlaceholder extends StatelessWidget {
-  const _SettingsPagePlaceholder();
 
-  @override
-  Widget build(BuildContext context) {
-    // 实际应导入 SettingsPage
-    return Scaffold(
-      backgroundColor: AppConstants.backgroundColor,
-      appBar: AppBar(
-        backgroundColor: AppConstants.surfaceColor,
-        title: const Text(
-          '设置',
-          style: TextStyle(color: AppConstants.textPrimary),
-        ),
-        iconTheme: const IconThemeData(color: AppConstants.textSecondary),
-      ),
-      body: const Center(
-        child: Text(
-          '设置页面（需导入settings/settings_page.dart）',
-          style: TextStyle(color: AppConstants.textSecondary),
-        ),
-      ),
-    );
-  }
-}
