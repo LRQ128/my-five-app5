@@ -98,13 +98,14 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
           return;
         }
 
+        // 从文件路径提取文件名作为模型名
+        final modelName = filePath.split('/').last.replaceAll('.gguf', '').replaceAll('.bin', '');
+
         setState(() {
           _loadedModelPath = filePath;
-          // 从文件路径提取文件名作为模型名
-          final fileName = filePath.split('/').last.replaceAll('.gguf', '').replaceAll('.bin', '');
           _currentModel = ModelConfig(
-            id: 'custom_$fileName',
-            name: fileName,
+            id: 'custom_$modelName',
+            name: modelName,
             filePath: filePath,
             description: '本地加载的 GGUF 模型文件',
             modelSize: File(filePath).lengthSync(),
@@ -117,7 +118,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('已加载模型: $fileName'),
+              content: Text('已加载模型: $modelName'),
               backgroundColor: AppConstants.successColor,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
@@ -870,7 +871,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
                   color: AppConstants.successColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.check, size: 14, color: AppConstants.successColor),
