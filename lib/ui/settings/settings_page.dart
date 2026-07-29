@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
-import '../../models/model_config.dart';
+import '../../services/model_manager.dart';
 import '../../utils/constants.dart';
 import 'model_management.dart';
 
 /// 设置页面——分段列表式布局
 class SettingsPage extends StatefulWidget {
-  final String currentModelName;
-  final ValueChanged<String>? onModelChanged;
+  final ModelManager modelManager;
 
   const SettingsPage({
     super.key,
-    this.currentModelName = 'Qwen2.5-7B-Q4_K_M',
-    this.onModelChanged,
+    required this.modelManager,
   });
 
   @override
@@ -35,38 +33,10 @@ class _SettingsPageState extends State<SettingsPage> {
   int _maxTokens = 2048;
   double _temperature = 0.7;
   int _threads = 4;
-  late String _currentModelName;
-
-  @override
-  void initState() {
-    super.initState();
-    _currentModelName = widget.currentModelName;
-  }
-
-  @override
-  void didUpdateWidget(SettingsPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.currentModelName != oldWidget.currentModelName) {
-      _currentModelName = widget.currentModelName;
-    }
-  }
-
-  /// 弹回聊天页时带上当前模型名
-  Future<bool> _onWillPop() async {
-    widget.onModelChanged?.call(_currentModelName);
-    return true;
-  }
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) {
-          widget.onModelChanged?.call(_currentModelName);
-        }
-      },
-      child: Scaffold(
+    return Scaffold(
       backgroundColor: AppConstants.backgroundColor,
       appBar: AppBar(
         backgroundColor: AppConstants.surfaceColor,
@@ -161,7 +131,6 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildAboutSection(context),
         ],
       ),
-      ),
     );
   }
 
@@ -183,6 +152,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
   /// 模型管理入口卡片
   Widget _buildModelEntry(BuildContext context) {
+    final currentConfig = widget.modelManager.currentConfig;
+    final modelName = currentConfig?.name ?? '未加载';
+    final isLoaded = widget.modelManager.isModelLoaded;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
@@ -195,19 +168,15 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       child: InkWell(
         onTap: () async {
-          final result = await Navigator.of(context).push<ModelConfig>(
+          await Navigator.of(context).push(
             MaterialPageRoute(
               builder: (context) => ModelManagementPage(
-                currentModelName: _currentModelName,
+                modelManager: widget.modelManager,
+                currentModelName: modelName,
               ),
             ),
           );
-          if (result != null && mounted) {
-            setState(() {
-              _currentModelName = result.name;
-            });
-            widget.onModelChanged?.call(result.name);
-          }
+          if (mounted) setState(() {});
         },
         borderRadius: BorderRadius.circular(14),
         child: Padding(
@@ -242,9 +211,11 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '当前模型: $_currentModelName',
+                      isLoaded ? '当前: $modelName' : '未加载模型',
                       style: TextStyle(
-                        color: AppConstants.textSecondary.withOpacity(0.7),
+                        color: isLoaded
+                            ? AppConstants.successColor.withOpacity(0.8)
+                            : AppConstants.textSecondary.withOpacity(0.5),
                         fontSize: 13,
                       ),
                     ),
@@ -389,7 +360,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       child: Column(
         children: [
-          _buildAboutRow('应用版本', '1.0.0'),
+          _buildAboutRow('应用版本', '1.0.1'),
           const Divider(
             height: 24,
             color: Color(0xFF3D3D5C),
@@ -482,5 +453,3 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 }
-
-

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../models/message.dart';
+import '../tools/tool_base.dart';
 import 'llm_service.dart';
 
 // =============================================================================
@@ -54,37 +55,6 @@ class AgentEvent {
 }
 
 // =============================================================================
-// 工具定义格式（OpenAI-compatible function calling）
-// =============================================================================
-
-/// 工具基类——供 Agent 调用。
-/// 注意：此接口需要与项目的实际 ToolBase 保持一致。
-/// 如果 ToolBase 子 agent 生成了不同接口，以实际接口为准。
-abstract class AgentToolBase {
-  /// 工具名称（唯一标识）
-  String get name;
-
-  /// 工具描述（用于 LLM 理解）
-  String get description;
-
-  /// JSON Schema 格式的参数定义
-  Map<String, dynamic> get parameters;
-
-  /// 执行工具，返回结果（字符串或 JSON 可序列化对象）
-  Future<dynamic> execute(Map<String, dynamic> arguments);
-
-  /// 转换为 OpenAI function calling 格式
-  Map<String, dynamic> toOpenAiFunction() => {
-        'type': 'function',
-        'function': {
-          'name': name,
-          'description': description,
-          'parameters': parameters,
-        },
-      };
-}
-
-// =============================================================================
 // Agent 引擎
 // =============================================================================
 
@@ -95,7 +65,9 @@ abstract class AgentToolBase {
 /// 2. 调用 LLM 流式生成
 /// 3. 解析响应中的 tool_calls
 /// 4. 执行工具并将结果注入对话
-/// 5. 循环直到模型直接回复（最多 5 轮工具调用）
+/// 5. 循环直到模型直接回复（最多 [maxToolCallRounds] 轮工具调用）
+///
+/// 通过 Stream<AgentEvent> 将执行过程实时通知给 UI。
 class AgentEngine {
   /// LLM 服务实例（可动态替换，null 表示还未绑定）
   LlmService? llmService;
@@ -122,19 +94,19 @@ class AgentEngine {
   ///
   /// [userMessage] 用户当前输入
   /// [history] 历史对话消息列表
-  /// [tools] 可用工具列表
+  /// [tools] 可用工具列表（ToolBase 类型）
   ///
   /// 返回流式 AgentEvent，依次输出 thinking → text/toolCall → ... → done/error
   Stream<AgentEvent> execute(
     String userMessage,
     List<Message> history,
-    List<AgentToolBase> tools,
+    List<ToolBase> tools,
   ) async* {
     _isRunning = true;
     _stopRequested = false;
 
     int toolCallRound = 0;
-    List<Message> workingHistory = List.from(history);
+    final List<Message> workingHistory = List.from(history);
 
     try {
       // 组装 system prompt（包含工具定义）
@@ -159,8 +131,9 @@ class AgentEngine {
         // 构建 prompt 文本（将消息列表转为模板格式）
         final promptText = _messagesToPrompt(currentMessages, userMessage);
 
-        // 调用 LLM 流式生成（带工具）
-        final toolsList = tools.map((t) => t.toOpenAiFunction()).toList();
+        // 调用 LLM 流式生成（带工具定义）
+        final toolsJson = jsonEncode(
+            tools.map((t) => t.toFunctionDefinition()).toList());
         final responseBuffer = StringBuffer();
         bool hasToolCalls = false;
 
@@ -168,19 +141,20 @@ class AgentEngine {
         if (service == null) {
           yield AgentEvent(
             type: AgentEventType.error,
-            data: 'LLM 服务未初始化',
+            data: 'LLM 服务未初始化，请先加载模型',
           );
           break;
         }
 
-        await for (final token in service.generateWithTools(
-          promptText,
-          history: currentMessages,
-          tools: toolsList,
-        )) {
+        // 使用 streamGenerate（不依赖原生 tool calling）
+        await for (final token in service.streamGenerate(promptText,
+            history: currentMessages)) {
           if (_stopRequested) break;
 
           responseBuffer.write(token);
+
+          // 把每个 token 作为 text 事件发出（支持打字机效果）
+          yield AgentEvent(type: AgentEventType.text, data: token);
 
           // 检查是否包含 tool_call JSON
           final accumulated = responseBuffer.toString();
@@ -214,43 +188,42 @@ class AgentEngine {
               );
 
               // 查找并执行工具
-              final tool =
-                  tools.where((t) => t.name == funcName).firstOrNull;
-              dynamic toolResult;
+              final tool = tools.where((t) => t.name == funcName).firstOrNull;
+              String resultStr;
               String? errorMessage;
 
               if (tool != null) {
                 try {
-                  toolResult = await tool.execute(funcArgs);
+                  final rawResult = await tool.execute(funcArgs);
+                  resultStr = rawResult;
                   yield AgentEvent(
                     type: AgentEventType.toolResult,
                     data: {
                       'callId': callId,
                       'name': funcName,
-                      'result': toolResult is String
-                          ? toolResult
-                          : jsonEncode(toolResult),
+                      'result': resultStr,
                     },
                   );
                 } catch (e) {
                   errorMessage = e.toString();
+                  resultStr = '工具执行出错: $errorMessage';
                   yield AgentEvent(
                     type: AgentEventType.toolResult,
                     data: {
                       'callId': callId,
                       'name': funcName,
-                      'result': '工具执行出错: $errorMessage',
+                      'result': resultStr,
                     },
                   );
                 }
               } else {
-                toolResult = '工具未找到: $funcName';
+                resultStr = '工具未找到: $funcName';
                 yield AgentEvent(
                   type: AgentEventType.toolResult,
                   data: {
                     'callId': callId,
                     'name': funcName,
-                    'result': toolResult,
+                    'result': resultStr,
                   },
                 );
               }
@@ -269,11 +242,12 @@ class AgentEngine {
 
         // 如果没有 tool_calls，模型直接给出了回复
         if (!hasToolCalls) {
+          final finalContent = responseBuffer.toString().trim();
           final assistantMessage = Message(
             id: 'assistant_${DateTime.now().millisecondsSinceEpoch}',
             conversationId: '',
             role: MessageRole.assistant,
-            content: responseBuffer.toString(),
+            content: finalContent.isEmpty ? '（无回复）' : finalContent,
             status: MessageStatus.completed,
             createdAt: DateTime.now(),
           );
@@ -313,12 +287,15 @@ class AgentEngine {
     llmService?.stop();
   }
 
+  /// 是否正在运行
+  bool get isRunning => _isRunning;
+
   // ---------------------------------------------------------------------------
   // System Prompt 构建
   // ---------------------------------------------------------------------------
 
   /// 构建包含工具定义的 System Prompt
-  String _buildSystemPrompt(List<AgentToolBase> tools) {
+  String _buildSystemPrompt(List<ToolBase> tools) {
     final buffer = StringBuffer();
 
     buffer.writeln('你是一个运行在本地设备上的智能AI助手。');
@@ -328,7 +305,8 @@ class AgentEngine {
     if (tools.isNotEmpty) {
       buffer.writeln('## 可用工具');
       buffer.writeln();
-      buffer.writeln('你可以调用以下工具来完成用户的任务。调用工具时，请严格按照指定的 JSON Schema 提供参数。');
+      buffer.writeln(
+          '你可以调用以下工具来完成用户的任务。调用工具时，请严格按照指定的 JSON Schema 提供参数。');
       buffer.writeln();
 
       for (final tool in tools) {
@@ -349,7 +327,7 @@ class AgentEngine {
       buffer.writeln('    "type": "function",');
       buffer.writeln('    "function": {');
       buffer.writeln('      "name": "工具名称",');
-      buffer.writeln('      "arguments": "{\"参数名\": \"参数值\"}"');
+      buffer.writeln('      "arguments": "{\\"参数名\\": \\"参数值\\"}"');
       buffer.writeln('    }');
       buffer.writeln('  }]');
       buffer.writeln('}');
@@ -359,9 +337,12 @@ class AgentEngine {
 
     buffer.writeln('## 回复要求');
     buffer.writeln('- 请用中文回复');
-    buffer.writeln('- 如果用户问题可以通过现有信息回答，直接回复，不要调用工具');
-    buffer.writeln('- 只在确实需要外部信息或执行操作时才调用工具');
-    buffer.writeln('- 工具调用结果会自动注入对话，请基于结果继续回复');
+    buffer.writeln(
+        '- 如果用户问题可以通过现有信息回答，直接回复，不要调用工具');
+    buffer.writeln(
+        '- 只在确实需要外部信息或执行操作时才调用工具');
+    buffer.writeln(
+        '- 工具调用结果会自动注入对话，请基于结果继续回复');
 
     return buffer.toString();
   }
@@ -371,7 +352,8 @@ class AgentEngine {
   // ---------------------------------------------------------------------------
 
   /// 将消息列表转换为 LLM prompt 文本（ChatML 格式）
-  String _messagesToPrompt(List<Message> messages, String currentUserMessage) {
+  String _messagesToPrompt(
+      List<Message> messages, String currentUserMessage) {
     final buffer = StringBuffer();
 
     for (final msg in messages) {
@@ -474,7 +456,7 @@ class AgentEngine {
   Future<List<Message>> _injectToolMessages(
     List<Message> currentMessages,
     List<dynamic> toolCalls,
-    List<AgentToolBase> tools,
+    List<ToolBase> tools,
   ) async {
     final newMessages = List<Message>.from(currentMessages);
 
@@ -484,11 +466,13 @@ class AgentEngine {
       final funcArgsStr = func['arguments'] as String;
       final callId = tc['id'] as String;
 
+      final args = jsonDecode(funcArgsStr) as Map<String, dynamic>;
+
       // 构造 assistant 消息（含 tool_calls）
-      var toolCallInfo = ToolCallInfo(
+      final toolCallInfo = ToolCallInfo(
         id: callId,
         name: funcName,
-        arguments: jsonDecode(funcArgsStr) as Map<String, dynamic>,
+        arguments: args,
         status: ToolCallStatus.completed,
       );
 
@@ -506,24 +490,9 @@ class AgentEngine {
       String resultStr;
       if (tool != null) {
         try {
-          final result = await _executeToolSync(tool, toolCallInfo.arguments);
-          resultStr = result is String ? result : jsonEncode(result);
-          toolCallInfo = ToolCallInfo(
-            id: callId,
-            name: funcName,
-            arguments: toolCallInfo.arguments,
-            result: resultStr,
-            status: ToolCallStatus.completed,
-          );
+          resultStr = await tool.execute(args);
         } catch (e) {
           resultStr = '工具执行出错: $e';
-          toolCallInfo = ToolCallInfo(
-            id: callId,
-            name: funcName,
-            arguments: toolCallInfo.arguments,
-            result: resultStr,
-            status: ToolCallStatus.error,
-          );
         }
       } else {
         resultStr = '工具未找到: $funcName';
@@ -541,16 +510,4 @@ class AgentEngine {
 
     return newMessages;
   }
-
-  /// 同步执行工具（包装异步调用）
-  Future<String> _executeToolSync(
-    AgentToolBase tool,
-    Map<String, dynamic> arguments,
-  ) async {
-    final result = await tool.execute(arguments);
-    return result is String ? result : jsonEncode(result);
-  }
-
-  /// 是否正在运行
-  bool get isRunning => _isRunning;
 }

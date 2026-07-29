@@ -1,16 +1,34 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../../models/message.dart';
+import '../../services/agent_engine.dart';
+import '../../services/conversation_service.dart';
+import '../../services/model_manager.dart';
+import '../../tools/tool_base.dart';
+import '../../tools/tool_registry.dart';
 import '../../utils/constants.dart';
 import '../settings/settings_page.dart';
 import 'chat_input.dart';
 import 'message_bubble.dart';
-import 'thinking_indicator.dart';
 
 /// 主聊天页面
 class ChatPage extends StatefulWidget {
   final String? conversationId;
+  final ModelManager modelManager;
+  final AgentEngine agentEngine;
+  final ConversationService conversationService;
+  final ToolRegistry toolRegistry;
 
-  const ChatPage({super.key, this.conversationId});
+  const ChatPage({
+    super.key,
+    this.conversationId,
+    required this.modelManager,
+    required this.agentEngine,
+    required this.conversationService,
+    required this.toolRegistry,
+  });
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -25,7 +43,12 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = false;
   bool _isGenerating = false;
   String _conversationId = '';
-  String _modelName = 'Qwen2.5-7B-Q4_K_M';
+
+  /// 当前流式输出的内容缓存
+  String _streamingContent = '';
+
+  /// Agent 流订阅
+  StreamSubscription<AgentEvent>? _agentSubscription;
 
   @override
   void initState() {
@@ -39,17 +62,30 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _agentSubscription?.cancel();
     _scrollController.dispose();
     _textController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
+  /// 获取当前模型名称
+  String get _modelName {
+    final config = widget.modelManager.currentConfig;
+    return config?.name ?? '未加载模型';
+  }
+
+  /// 获取模型加载状态
+  bool get _modelLoaded => widget.modelManager.isModelLoaded;
+
   /// 创建新对话
   void _createNewConversation() {
+    _agentSubscription?.cancel();
     setState(() {
       _messages = [_createSystemMessage()];
       _conversationId = DateTime.now().millisecondsSinceEpoch.toString();
+      _streamingContent = '';
+      _isGenerating = false;
     });
   }
 
@@ -79,11 +115,18 @@ class _ChatPageState extends State<ChatPage> {
     setState(() {
       _messages.add(userMessage);
       _isGenerating = true;
+      _streamingContent = '';
     });
 
     _scrollToBottom();
 
-    // 创建AI占位消息
+    // 检查模型是否已加载
+    if (!_modelLoaded) {
+      _showErrorAndStop('模型未加载，请先在设置中选择并加载模型');
+      return;
+    }
+
+    // 创建AI占位消息（空内容，streaming状态）
     final aiMessageId = 'msg_${DateTime.now().millisecondsSinceEpoch}_ai';
     final aiMessage = Message(
       id: aiMessageId,
@@ -98,69 +141,189 @@ class _ChatPageState extends State<ChatPage> {
       _messages.add(aiMessage);
     });
 
-    // 模拟流式输出
-    await _simulateStreamingResponse(aiMessageId, text);
+    // 构建历史消息（排除刚添加的user消息，execute会自动加上）
+    final historyMessages = _messages
+        .where((m) => m.role != MessageRole.system && m.id != userMessage.id)
+        .toList();
+    final tools = widget.toolRegistry.getAllTools();
 
-    setState(() {
-      _isGenerating = false;
-    });
+    try {
+      // 订阅 Agent 事件流
+      _agentSubscription = widget.agentEngine
+          .execute(text, historyMessages, tools)
+          .listen((event) {
+        if (!mounted) return;
 
-    _scrollToBottom();
+        switch (event.type) {
+          case AgentEventType.thinking:
+            // 思考状态，不更新内容
+            break;
+
+          case AgentEventType.text:
+            // 追加文本 token，实现打字机效果
+            _streamingContent += (event.data as String);
+            _updateAiMessage(aiMessageId, _streamingContent,
+                status: MessageStatus.streaming);
+            break;
+
+          case AgentEventType.toolCall:
+            // 工具调用开始
+            final data = event.data as Map<String, dynamic>;
+            final toolName = data['name'] as String;
+            final toolArgs = data['arguments'] as Map<String, dynamic>;
+            final callId = data['callId'] as String;
+
+            // 追加工具调用信息到内容
+            _streamingContent += '\n\n🔧 **调用工具: $toolName**\n';
+            _updateAiMessage(aiMessageId, _streamingContent,
+                status: MessageStatus.streaming);
+            break;
+
+          case AgentEventType.toolResult:
+            // 工具执行结果
+            final data = event.data as Map<String, dynamic>;
+            final toolName = data['name'] as String;
+
+            _streamingContent += '\n✅ **$toolName 执行完成**\n\n';
+            _updateAiMessage(aiMessageId, _streamingContent,
+                status: MessageStatus.streaming);
+            break;
+
+          case AgentEventType.done:
+            // 最终回复
+            final finalMessage = event.data as Message;
+            _updateAiMessage(aiMessageId, finalMessage.content,
+                status: MessageStatus.completed);
+            _onGenerationComplete(aiMessageId);
+            break;
+
+          case AgentEventType.error:
+            // 出错
+            final errorText = event.data as String;
+            _updateAiMessage(aiMessageId, _streamingContent + '\n\n⚠️ $errorText',
+                status: MessageStatus.error,
+                errorMessage: errorText);
+            _onGenerationComplete(aiMessageId);
+            break;
+        }
+      }, onDone: () {
+        // 流自然结束，没有收到 done/error 事件
+        if (_streamingContent.isNotEmpty) {
+          _updateAiMessage(aiMessageId, _streamingContent,
+              status: MessageStatus.completed);
+        }
+        _onGenerationComplete(aiMessageId);
+      }, onError: (error) {
+        if (!mounted) return;
+        _updateAiMessage(aiMessageId,
+            _streamingContent + '\n\n⚠️ $error',
+            status: MessageStatus.error,
+            errorMessage: error.toString());
+        _onGenerationComplete(aiMessageId);
+      });
+    } catch (e) {
+      _updateAiMessage(aiMessageId,
+          _streamingContent + '\n\n⚠️ 执行出错: $e',
+          status: MessageStatus.error,
+          errorMessage: e.toString());
+      _onGenerationComplete(aiMessageId);
+    }
   }
 
-  /// 模拟流式响应（实际对接AgentEngine）
-  Future<void> _simulateStreamingResponse(String aiMessageId, String userText) async {
-    final responseText = _generateMockResponse(userText);
-
-    for (int i = 0; i < responseText.length; i++) {
-      await Future.delayed(const Duration(milliseconds: 30));
-
-      if (!mounted) return;
-
-      setState(() {
-        final index = _messages.indexWhere((m) => m.id == aiMessageId);
-        if (index != -1) {
-          _messages[index] = _messages[index].copyWith(
-            content: responseText.substring(0, i + 1),
-          );
-        }
-      });
-    }
-
-    // 完成流式输出
+  /// 更新 AI 消息
+  void _updateAiMessage(
+    String messageId,
+    String content, {
+    required MessageStatus status,
+    String? errorMessage,
+  }) {
+    if (!mounted) return;
     setState(() {
-      final index = _messages.indexWhere((m) => m.id == aiMessageId);
+      final index = _messages.indexWhere((m) => m.id == messageId);
       if (index != -1) {
         _messages[index] = _messages[index].copyWith(
-          status: MessageStatus.completed,
+          content: content,
+          status: status,
+          errorMessage: errorMessage,
         );
       }
     });
+    _scrollToBottom();
   }
 
-  /// 生成模拟回复
-  String _generateMockResponse(String userInput) {
-    if (userInput.contains('你好') || userInput.contains('hi') || userInput.contains('hello')) {
-      return '你好！我是本地AI助手，运行在你的设备上。我能帮你回答问题、搜索信息、执行计算等。有什么我可以帮助你的吗？';
-    } else if (userInput.contains('天气')) {
-      return '我目前无法直接获取实时天气数据，因为需要通过工具调用联网搜索。\n\n不过我可以尝试使用搜索工具来获取天气信息。你想让我搜索哪个城市的天气？';
-    } else if (userInput.contains('代码') || userInput.contains('code')) {
-      return '我可以帮你编写和解释代码！请告诉我你想实现什么功能？支持的语言包括 Dart, Python, JavaScript, C++ 等。';
-    } else if (userInput.contains('工具')) {
-      return '我支持以下工具调用：\n\n- **web_search**: 联网搜索获取实时信息\n- **calculator**: 数学计算\n- **code_execution**: 代码执行\n- **file_read/file_write**: 文件读写\n\n你可以在设置中管理工具的启用/禁用。';
-    } else {
-      return '收到你的消息："$userInput"\n\n这是一个模拟回复。实际环境中，这里会接入 AgentEngine 进行本地大模型推理，并且支持工具调用和联网搜索等功能。';
+  /// 生成完成后的清理
+  void _onGenerationComplete(String aiMessageId) {
+    if (!mounted) return;
+    setState(() {
+      _isGenerating = false;
+      _streamingContent = '';
+    });
+    _agentSubscription?.cancel();
+    _agentSubscription = null;
+    _scrollToBottom();
+  }
+
+  /// 显示错误并停止
+  void _showErrorAndStop(String errorMessage) {
+    setState(() {
+      _isGenerating = false;
+    });
+    // 添加错误提示消息
+    if (_messages.isNotEmpty) {
+      final lastMsg = _messages.last;
+      if (lastMsg.role == MessageRole.assistant &&
+          lastMsg.status == MessageStatus.streaming) {
+        _messages[_messages.length - 1] = lastMsg.copyWith(
+          content: errorMessage,
+          status: MessageStatus.error,
+          errorMessage: errorMessage,
+        );
+      } else {
+        _messages.add(Message(
+          id: 'error_${DateTime.now().millisecondsSinceEpoch}',
+          conversationId: _conversationId,
+          role: MessageRole.assistant,
+          content: errorMessage,
+          status: MessageStatus.error,
+          errorMessage: errorMessage,
+          createdAt: DateTime.now(),
+        ));
+      }
     }
+    _scrollToBottom();
+  }
+
+  /// 停止生成
+  void _stopGenerating() {
+    _agentSubscription?.cancel();
+    _agentSubscription = null;
+    widget.agentEngine.stop();
+
+    setState(() {
+      _isGenerating = false;
+      // 将正在流式输出的消息标记为完成
+      for (int i = 0; i < _messages.length; i++) {
+        if (_messages[i].status == MessageStatus.streaming) {
+          _messages[i] = _messages[i].copyWith(
+            content: _messages[i].content.isEmpty
+                ? '（已停止生成）'
+                : _messages[i].content,
+            status: MessageStatus.completed,
+          );
+        }
+      }
+      _streamingContent = '';
+    });
   }
 
   /// 滚动到底部
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      Future.delayed(const Duration(milliseconds: 100), () {
+      Future.delayed(const Duration(milliseconds: 80), () {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
             _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
+            duration: const Duration(milliseconds: 200),
             curve: Curves.easeOut,
           );
         }
@@ -168,36 +331,17 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  /// 停止生成
-  void _stopGenerating() {
-    setState(() {
-      _isGenerating = false;
-      // 将正在流式输出的消息标记为完成
-      for (int i = 0; i < _messages.length; i++) {
-        if (_messages[i].status == MessageStatus.streaming) {
-          _messages[i] = _messages[i].copyWith(
-            status: MessageStatus.completed,
-          );
-        }
-      }
-    });
-  }
-
   /// 打开设置页面
   Future<void> _openSettings() async {
-    final modelName = _modelName;
-    final result = await Navigator.of(context).push<String>(
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => SettingsPage(
-          currentModelName: modelName,
-          onModelChanged: (name) {
-            setState(() {
-              _modelName = name;
-            });
-          },
+          modelManager: widget.modelManager,
         ),
       ),
     );
+    // 从设置页面返回后刷新状态
+    if (mounted) setState(() {});
   }
 
   @override
@@ -268,12 +412,18 @@ class _ChatPageState extends State<ChatPage> {
                 decoration: BoxDecoration(
                   color: _isGenerating
                       ? AppConstants.accentColor
-                      : AppConstants.successColor,
+                      : _modelLoaded
+                          ? AppConstants.successColor
+                          : AppConstants.errorColor,
                   shape: BoxShape.circle,
                 ),
               ),
               Text(
-                _isGenerating ? '生成中...' : '$_modelName',
+                _isGenerating
+                    ? '生成中...'
+                    : _modelLoaded
+                        ? _modelName
+                        : '⚠️ 未加载模型',
                 style: TextStyle(
                   color: AppConstants.textSecondary.withOpacity(0.7),
                   fontSize: 12,
@@ -336,44 +486,80 @@ class _ChatPageState extends State<ChatPage> {
   /// 空状态
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppConstants.primaryColor.withOpacity(0.1),
-              shape: BoxShape.circle,
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppConstants.primaryColor.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.psychology,
+                color: AppConstants.primaryColor,
+                size: 40,
+              ),
             ),
-            child: const Icon(
-              Icons.psychology,
-              color: AppConstants.primaryColor,
-              size: 40,
+            const SizedBox(height: 24),
+            const Text(
+              '本地AI助手',
+              style: TextStyle(
+                color: AppConstants.textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            '本地AI助手',
-            style: TextStyle(
-              color: AppConstants.textPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+            const SizedBox(height: 8),
+            Text(
+              '基于本地大模型推理，隐私安全\n支持工具调用、联网搜索',
+              style: TextStyle(
+                color: AppConstants.textSecondary.withOpacity(0.7),
+                fontSize: 14,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '基于本地大模型推理，隐私安全\n支持工具调用、联网搜索',
-            style: TextStyle(
-              color: AppConstants.textSecondary.withOpacity(0.7),
-              fontSize: 14,
-              height: 1.5,
+            const SizedBox(height: 8),
+            // 模型加载状态提示
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _modelLoaded
+                    ? AppConstants.successColor.withOpacity(0.1)
+                    : AppConstants.errorColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _modelLoaded ? Icons.check_circle : Icons.warning,
+                    size: 14,
+                    color: _modelLoaded
+                        ? AppConstants.successColor
+                        : AppConstants.errorColor,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _modelLoaded ? '模型已加载' : '模型未加载',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: _modelLoaded
+                          ? AppConstants.successColor
+                          : AppConstants.errorColor,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 32),
-          _buildSuggestionChips(),
-        ],
+            const SizedBox(height: 32),
+            _buildSuggestionChips(),
+          ],
+        ),
       ),
     );
   }
@@ -408,11 +594,9 @@ class _ChatPageState extends State<ChatPage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          onPressed: () => _sendMessage(text),
+          onPressed: _modelLoaded ? () => _sendMessage(text) : null,
         );
       }).toList(),
     );
   }
 }
-
-

@@ -8,6 +8,11 @@ import 'services/memory_service.dart';
 import 'tools/tool_registry.dart';
 import 'utils/constants.dart';
 
+/// 本地AI助手 App 入口
+///
+/// 负责：
+/// 1. 初始化所有核心服务
+/// 2. 将依赖注入到子页面
 class LocalAiAssistantApp extends StatefulWidget {
   const LocalAiAssistantApp({super.key});
 
@@ -33,28 +38,26 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
 
   Future<void> _initializeApp() async {
     try {
-      // 1. 初始化工具注册中心
-      toolRegistry = ToolRegistry();
-      toolRegistry.registerDefaults();
-
-      // 2. 初始化模型管理器
-      modelManager = ModelManager();
-
-      // 2a. 初始化记忆服务
+      // 1. 初始化记忆服务
       memoryService = MemoryService();
       await memoryService.init();
 
-      // 2b. 注入记忆服务到模型管理器
+      // 2. 初始化模型管理器（加载持久化配置）
+      modelManager = ModelManager();
       modelManager.injectMemoryService(memoryService);
+      await modelManager.init();
 
-      // 3. 初始化对话服务
+      // 3. 初始化 Agent 引擎（绑定 LLM 服务）
+      agentEngine = AgentEngine(
+        llmService: modelManager.llmService,
+      );
+
+      // 4. 初始化工具注册中心（自动注册默认工具）
+      toolRegistry = ToolRegistry();
+
+      // 5. 初始化对话服务
       conversationService = ConversationService();
       await conversationService.initialize();
-
-      // 4. 初始化Agent引擎（先传null，等模型加载后设置）
-      agentEngine = AgentEngine(
-        llmService: null,
-      );
 
       setState(() {
         _initialized = true;
@@ -101,9 +104,9 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
                 const Icon(Icons.error_outline,
                     size: 64, color: AppConstants.errorColor),
                 const SizedBox(height: 16),
-                Text(
+                const Text(
                   '初始化失败',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppConstants.textPrimary,
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -146,13 +149,13 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(
+              const CircularProgressIndicator(
                 color: AppConstants.primaryColor,
               ),
               const SizedBox(height: 24),
-              Text(
+              const Text(
                 AppConstants.appName,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppConstants.textPrimary,
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
@@ -173,6 +176,12 @@ class _LocalAiAssistantAppState extends State<LocalAiAssistantApp> {
       );
     }
 
-    return ChatPage();
+    // 将依赖注入到 ChatPage
+    return ChatPage(
+      modelManager: modelManager,
+      agentEngine: agentEngine,
+      conversationService: conversationService,
+      toolRegistry: toolRegistry,
+    );
   }
 }

@@ -13,7 +13,7 @@ import 'memory_service.dart';
 /// 模型管理器——支持多模型热切换。
 ///
 /// 维护当前 LlmService 实例和 ModelConfig 列表。
-/// 从 SharedPreferences 持久化当前选中的模型配置。
+/// 从 SharedPreferences 持久化当前选中的模型配置和自定义模型列表。
 ///
 /// 使用方式：
 /// ```dart
@@ -53,8 +53,9 @@ class ModelManager {
   /// 是否已初始化
   bool _initialized = false;
 
-  /// SharedPreferences key
+  /// SharedPreferences keys
   static const String _prefsKeyCurrentModel = 'current_model_config';
+  static const String _prefsKeyCustomModels = 'custom_models_list';
 
   // ---------------------------------------------------------------------------
   // Getter
@@ -88,11 +89,22 @@ class ModelManager {
   Future<void> init() async {
     if (_initialized) return;
 
-    // 初始化可用模型列表（合并内置模型和用户添加的模型）
-    _availableModels = List.from(ModelConfig.recommendedModels);
-
-    // 从 SharedPreferences 加载上次使用的模型
     final prefs = await SharedPreferences.getInstance();
+
+    // 1. 恢复自定义模型列表
+    final customModels = await _loadCustomModels(prefs);
+
+    // 2. 合并可用模型列表（内置 + 自定义）
+    _availableModels = List.from(ModelConfig.recommendedModels);
+    for (final custom in customModels) {
+      // 去重：如果已有同 id 的内置模型则跳过
+      final exists = _availableModels.any((m) => m.id == custom.id);
+      if (!exists) {
+        _availableModels.add(custom);
+      }
+    }
+
+    // 3. 从 SharedPreferences 加载上次使用的模型
     final configJson = prefs.getString(_prefsKeyCurrentModel);
 
     if (configJson != null) {
@@ -100,17 +112,47 @@ class ModelManager {
         final configMap = jsonDecode(configJson) as Map<String, dynamic>;
         _currentConfig = ModelConfig.fromMap(configMap);
       } catch (e) {
-        // 配置解析失败，使用默认模型
         _currentConfig = _getDefaultModel();
       }
     } else {
       _currentConfig = _getDefaultModel();
     }
 
-    // 初始化 LlmService
+    // 4. 初始化 LlmService
     _llmService = LlamaCppService(memoryService: _memoryService);
 
     _initialized = true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 自定义模型持久化
+  // ---------------------------------------------------------------------------
+
+  /// 从 SharedPreferences 加载自定义模型列表
+  Future<List<ModelConfig>> _loadCustomModels(SharedPreferences prefs) async {
+    final jsonStr = prefs.getString(_prefsKeyCustomModels);
+    if (jsonStr == null) return [];
+
+    try {
+      final list = jsonDecode(jsonStr) as List<dynamic>;
+      return list
+          .map((e) => ModelConfig.fromMap(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// 保存自定义模型列表到 SharedPreferences
+  Future<void> _saveCustomModels() async {
+    final prefs = await SharedPreferences.getInstance();
+    // 只保存不在内置列表中的模型
+    final customModels = _availableModels.where((m) {
+      return !ModelConfig.recommendedModels.any((rm) => rm.id == m.id);
+    }).toList();
+
+    final jsonStr = jsonEncode(customModels.map((m) => m.toMap()).toList());
+    await prefs.setString(_prefsKeyCustomModels, jsonStr);
   }
 
   // ---------------------------------------------------------------------------
@@ -168,11 +210,11 @@ class ModelManager {
   List<ModelConfig> getAvailableModels() => List.unmodifiable(_availableModels);
 
   // ---------------------------------------------------------------------------
-  // 模型增删（预留接口）
+  // 模型增删
   // ---------------------------------------------------------------------------
 
-  /// 添加自定义模型配置
-  void addModel(ModelConfig config) {
+  /// 添加自定义模型配置（持久化保存）
+  Future<void> addModel(ModelConfig config) async {
     // 检查是否已存在
     final existingIndex =
         _availableModels.indexWhere((m) => m.id == config.id);
@@ -181,14 +223,18 @@ class ModelManager {
     } else {
       _availableModels.add(config);
     }
+    // 持久化
+    await _saveCustomModels();
   }
 
   /// 移除指定模型配置（不能移除当前加载的模型）
-  void removeModel(String id) {
+  Future<void> removeModel(String id) async {
     if (_currentConfig?.id == id && isModelLoaded) {
       throw Exception('不能移除当前正在使用的模型，请先切换到其他模型');
     }
     _availableModels.removeWhere((m) => m.id == id);
+    // 持久化
+    await _saveCustomModels();
   }
 
   // ---------------------------------------------------------------------------
@@ -208,6 +254,7 @@ class ModelManager {
   Future<void> clearPersistedConfig() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKeyCurrentModel);
+    await prefs.remove(_prefsKeyCustomModels);
   }
 
   // ---------------------------------------------------------------------------
