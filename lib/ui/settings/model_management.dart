@@ -520,7 +520,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
                   color: AppConstants.successColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
