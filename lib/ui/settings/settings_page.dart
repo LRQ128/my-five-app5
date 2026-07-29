@@ -5,7 +5,14 @@ import 'model_management.dart';
 
 /// 设置页面——分段列表式布局
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  final String currentModelName;
+  final ValueChanged<String>? onModelChanged;
+
+  const SettingsPage({
+    super.key,
+    this.currentModelName = 'Qwen2.5-7B-Q4_K_M',
+    this.onModelChanged,
+  });
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -28,10 +35,38 @@ class _SettingsPageState extends State<SettingsPage> {
   int _maxTokens = 2048;
   double _temperature = 0.7;
   int _threads = 4;
+  late String _currentModelName;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentModelName = widget.currentModelName;
+  }
+
+  @override
+  void didUpdateWidget(SettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.currentModelName != oldWidget.currentModelName) {
+      _currentModelName = widget.currentModelName;
+    }
+  }
+
+  /// 弹回聊天页时带上当前模型名
+  Future<bool> _onWillPop() async {
+    widget.onModelChanged?.call(_currentModelName);
+    return true;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          widget.onModelChanged?.call(_currentModelName);
+        }
+      },
+      child: Scaffold(
       backgroundColor: AppConstants.backgroundColor,
       appBar: AppBar(
         backgroundColor: AppConstants.surfaceColor,
@@ -126,6 +161,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildAboutSection(context),
         ],
       ),
+      ),
     );
   }
 
@@ -158,12 +194,20 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ),
       child: InkWell(
-        onTap: () {
-          Navigator.of(context).push(
+        onTap: () async {
+          final result = await Navigator.of(context).push<ModelConfig>(
             MaterialPageRoute(
-              builder: (context) => const ModelManagementPage(),
+              builder: (context) => ModelManagementPage(
+                currentModelName: _currentModelName,
+              ),
             ),
           );
+          if (result != null && mounted) {
+            setState(() {
+              _currentModelName = result.name;
+            });
+            widget.onModelChanged?.call(result.name);
+          }
         },
         borderRadius: BorderRadius.circular(14),
         child: Padding(
@@ -198,7 +242,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '当前模型: Qwen2.5-7B-Q4_K_M',
+                      '当前模型: $_currentModelName',
                       style: TextStyle(
                         color: AppConstants.textSecondary.withOpacity(0.7),
                         fontSize: 13,

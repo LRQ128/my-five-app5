@@ -10,11 +10,13 @@ import '../../utils/constants.dart';
 class ModelManagementPage extends StatefulWidget {
   final ModelConfig? currentModel;
   final ValueChanged<ModelConfig>? onModelChanged;
+  final String currentModelName;
 
   const ModelManagementPage({
     super.key,
     this.currentModel,
     this.onModelChanged,
+    this.currentModelName = 'Qwen2.5-7B-Q4_K_M',
   });
 
   @override
@@ -33,8 +35,15 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
   @override
   void initState() {
     super.initState();
+    // 优先使用传入的模型名
+    final existing = ModelConfig.recommendedModels.where(
+      (m) => m.name == widget.currentModelName,
+    );
     _currentModel = widget.currentModel ??
-        ModelConfig.recommendedModels.first;
+        (existing.isNotEmpty ? existing.first : ModelConfig.recommendedModels.first);
+    if (widget.currentModel != null) {
+      _loadedModelPath = widget.currentModel!.filePath;
+    }
   }
 
   Future<void> _switchModel(ModelConfig config) async {
@@ -410,7 +419,14 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          widget.onModelChanged?.call(_currentModel);
+        }
+      },
+      child: Scaffold(
       backgroundColor: AppConstants.backgroundColor,
       appBar: AppBar(
         backgroundColor: AppConstants.surfaceColor,
@@ -450,6 +466,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
                 _buildLoadedModelSection(),
               ],
             ),
+      ),
     );
   }
 

@@ -184,10 +184,18 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// 打开设置页面
-  void _openSettings() {
-    Navigator.of(context).push(
+  Future<void> _openSettings() async {
+    final modelName = _modelName;
+    final result = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (context) => const SettingsPage(),
+        builder: (context) => SettingsPage(
+          currentModelName: modelName,
+          onModelChanged: (name) {
+            setState(() {
+              _modelName = name;
+            });
+          },
+        ),
       ),
     );
   }
