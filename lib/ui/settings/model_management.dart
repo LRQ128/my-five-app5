@@ -1,15 +1,19 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+
 import '../../models/model_config.dart';
 import '../../utils/constants.dart';
 
 /// 模型管理页面
 class ModelManagementPage extends StatefulWidget {
-  final ModelConfig currentModel;
+  final ModelConfig? currentModel;
   final ValueChanged<ModelConfig>? onModelChanged;
 
   const ModelManagementPage({
     super.key,
-    required this.currentModel,
+    this.currentModel,
     this.onModelChanged,
   });
 
@@ -24,11 +28,13 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
   double _downloadProgress = 0.0;
   bool _isDownloading = false;
   String? _downloadStatus;
+  String? _loadedModelPath;
 
   @override
   void initState() {
     super.initState();
-    _currentModel = widget.currentModel;
+    _currentModel = widget.currentModel ??
+        ModelConfig.recommendedModels.first;
   }
 
   Future<void> _switchModel(ModelConfig config) async {
@@ -64,34 +70,77 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
     }
   }
 
-  /// 模拟下载模型
-  void _simulateDownload(String source) {
-    setState(() {
-      _isDownloading = true;
-      _downloadProgress = 0.0;
-      _downloadStatus = '准备下载...';
-    });
+  /// 使用文件选择器选择 .gguf 模型文件
+  Future<void> _pickModelFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+      );
 
-    const totalSteps = 20;
-    for (int i = 1; i <= totalSteps; i++) {
-      Future.delayed(Duration(milliseconds: 200 * i), () {
-        if (!mounted) return;
+      if (result != null && result.files.isNotEmpty) {
+        final filePath = result.files.single.path;
+        if (filePath == null) return;
+
+        if (!filePath.endsWith('.gguf') && !filePath.endsWith('.bin')) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('请选择 .gguf 格式的模型文件'),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
         setState(() {
-          _downloadProgress = i / totalSteps;
-          _downloadStatus =
-              '下载中... ${(i / totalSteps * 100).toStringAsFixed(0)}%';
+          _loadedModelPath = filePath;
+          // 从文件路径提取文件名作为模型名
+          final fileName = filePath.split('/').last.replaceAll('.gguf', '').replaceAll('.bin', '');
+          _currentModel = ModelConfig(
+            id: 'custom_$fileName',
+            name: fileName,
+            filePath: filePath,
+            description: '本地加载的 GGUF 模型文件',
+            modelSize: File(filePath).lengthSync(),
+            quantization: 'GGUF',
+          );
         });
-      });
-    }
 
-    Future.delayed(const Duration(milliseconds: 4500), () {
-      if (!mounted) return;
-      setState(() {
-        _isDownloading = false;
-        _downloadProgress = 1.0;
-        _downloadStatus = '下载完成';
-      });
-    });
+        widget.onModelChanged?.call(_currentModel);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('已加载模型: $fileName'),
+              backgroundColor: AppConstants.successColor,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('选择文件失败: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   /// 显示添加模型对话框
@@ -135,7 +184,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
                 subtitle: '选择本地 .gguf 模型文件',
                 onTap: () {
                   Navigator.pop(context);
-                  _simulateDownload('从文件加载');
+                  _pickModelFile();
                 },
               ),
               const SizedBox(height: 12),
@@ -273,7 +322,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
               onPressed: () {
                 Navigator.pop(context);
                 if (urlController.text.isNotEmpty) {
-                  _simulateDownload('从 HuggingFace 下载');
+                  _showDownloadInstructions(urlController.text);
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -338,7 +387,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
                       ? null
                       : () {
                           Navigator.pop(context);
-                          _simulateDownload(model.name);
+                          _showDownloadInstructions(model.name);
                         },
                 );
               },
@@ -396,6 +445,8 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
                 _buildAvailableModelsSection(),
                 const SizedBox(height: 24),
                 _buildAddModelSection(),
+                const SizedBox(height: 24),
+                _buildLoadedModelSection(),
               ],
             ),
     );
@@ -723,6 +774,122 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// 显示模型下载方式说明
+  void _showDownloadInstructions(String name) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('请先在浏览器下载 $name，\n再到"添加模型"→"从文件选择"加载'),
+          backgroundColor: AppConstants.accentColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  /// 已加载的自定义模型
+  Widget _buildLoadedModelSection() {
+    if (_loadedModelPath == null) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 12),
+          child: Text(
+            '本地模型',
+            style: TextStyle(
+              color: AppConstants.primaryColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppConstants.primaryColor.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: AppConstants.primaryColor.withOpacity(0.3),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppConstants.primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.folder,
+                  color: AppConstants.primaryColor,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _currentModel.name,
+                      style: const TextStyle(
+                        color: AppConstants.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _loadedModelPath ?? '',
+                      style: TextStyle(
+                        color: AppConstants.textSecondary.withOpacity(0.6),
+                        fontSize: 11,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppConstants.successColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check, size: 14, color: AppConstants.successColor),
+                    SizedBox(width: 4),
+                    Text(
+                      '已加载',
+                      style: TextStyle(
+                        color: AppConstants.successColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

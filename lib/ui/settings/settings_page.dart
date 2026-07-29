@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../models/model_config.dart';
 import '../../utils/constants.dart';
+import 'model_management.dart';
 
 /// 设置页面——分段列表式布局
 class SettingsPage extends StatefulWidget {
@@ -157,10 +159,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       child: InkWell(
         onTap: () {
-          // 导航到模型管理页面
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (context) => const _ModelManagementPlaceholder(),
+              builder: (context) => const ModelManagementPage(),
             ),
           );
         },
@@ -438,28 +439,4 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// 模型管理占位器（实际导航到 ModelManagementPage）
-class _ModelManagementPlaceholder extends StatelessWidget {
-  const _ModelManagementPlaceholder();
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppConstants.backgroundColor,
-      appBar: AppBar(
-        backgroundColor: AppConstants.surfaceColor,
-        title: const Text(
-          '模型管理',
-          style: TextStyle(color: AppConstants.textPrimary),
-        ),
-        iconTheme: const IconThemeData(color: AppConstants.textSecondary),
-      ),
-      body: const Center(
-        child: Text(
-          '模型管理页面（需导入settings/model_management.dart）',
-          style: TextStyle(color: AppConstants.textSecondary),
-        ),
-      ),
-    );
-  }
-}
