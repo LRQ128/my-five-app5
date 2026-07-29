@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- AI Brain icon - simple circuit pattern -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28 m-4,0 a4,4 0,1,1,8,0 a4,4 0,1,1,-8,0
+            M54,42 m-4,0 a4,4 0,1,1,8,0 a4,4 0,1,1,-8,0
+            M54,56 m-4,0 a4,4 0,1,1,8,0 a4,4 0,1,1,-8,0
+            M40,35 m-3,0 a3,3 0,1,1,6,0 a3,3 0,1,1,-6,0
+            M40,49 m-3,0 a3,3 0,1,1,6,0 a3,3 0,1,1,-6,0
+            M68,35 m-3,0 a3,3 0,1,1,6,0 a3,3 0,1,1,-6,0
+            M68,49 m-3,0 a3,3 0,1,1,6,0 a3,3 0,1,1,-6,0" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M54,32 L54,38 M54,46 L54,52
+            M44,35 L50,35 M58,35 L64,35
+            M44,49 L50,49 M58,49 L64,49
+            M50,42 L44,38 M58,42 L64,38
+            M50,42 L44,46 M58,42 L64,46" />
+</vector>
