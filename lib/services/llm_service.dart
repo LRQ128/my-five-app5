@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_gemma/flutter_gemma.dart'
     hide Message; // flutter_gemma 的 Message 与我们的冲突
 import 'package:flutter_gemma/core/message.dart' as gemma_msg;
+import 'package:flutter_gemma/core/model_response.dart' as gemma_resp;
 
 import '../models/message.dart';
 import '../models/model_config.dart';
@@ -105,7 +106,7 @@ class FlutterGemmaService implements LlmService {
       final response = await _chat!.generateChatResponse();
       // ModelResponse is a sealed class; extract text from TextResponse
       return switch (response) {
-        gemma_msg.TextResponse t => t.token,
+        gemma_resp.TextResponse t => t.token,
         _ => response.toString(),
       };
     } catch (e) {
@@ -134,7 +135,7 @@ class FlutterGemmaService implements LlmService {
       await for (final response in _chat!.generateChatResponseAsync()) {
         if (_stopRequested) break;
         // ModelResponse is a sealed class; extract text from TextResponse
-        if (response is gemma_msg.TextResponse) {
+        if (response is gemma_resp.TextResponse) {
           yield response.token;
         }
       }
