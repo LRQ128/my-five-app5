@@ -101,9 +101,13 @@ class FlutterGemmaService implements LlmService {
     _stopRequested = false;
 
     try {
-      await _chat!.addQuery(gemma_msg.Message.text(prompt));
+      await _chat!.addQuery(gemma_msg.Message.text(text: prompt));
       final response = await _chat!.generateChatResponse();
-      return response.text;
+      // ModelResponse is a sealed class; extract text from TextResponse
+      return switch (response) {
+        gemma_msg.TextResponse t => t.token,
+        _ => response.toString(),
+      };
     } catch (e) {
       return '⚠️ 生成出错: $e';
     }
@@ -126,10 +130,13 @@ class FlutterGemmaService implements LlmService {
     _stopRequested = false;
 
     try {
-      await _chat!.addQuery(gemma_msg.Message.text(prompt));
+      await _chat!.addQuery(gemma_msg.Message.text(text: prompt));
       await for (final response in _chat!.generateChatResponseAsync()) {
         if (_stopRequested) break;
-        yield response.text;
+        // ModelResponse is a sealed class; extract text from TextResponse
+        if (response is gemma_msg.TextResponse) {
+          yield response.token;
+        }
       }
     } catch (e) {
       yield '\n\n⚠️ 流式生成出错: $e';
