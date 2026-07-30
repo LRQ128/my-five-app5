@@ -35,8 +35,10 @@ jobs:
           mkdir build && cd build
           cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON             -DLLAMA_CUDA=OFF -DLLAMA_METAL=OFF -DLLAMA_VULKAN=OFF             -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF             ..
           cmake --build . --target llama -j$(nproc)
-          find . -name "libllama.so" -exec cp {} ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/ \;
-          ls -lh ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/libllama.so
+          # 复制全部 .so 到 jniLibs（libllama.so + libggml.so + 其他依赖）
+          find . -name "*.so" -exec cp -v {} ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/ \;
+          echo "=== JNILIBS CONTENTS ==="
+          ls -lh ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/
 
       - name: Apply Android config
         run: |
