@@ -30,9 +30,21 @@ jobs:
 
       - name: Build libllama.so (Android native)
         run: |
-          git clone --depth=1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp
+          # 查找 llama_cpp_dart 包自带的兼容版本源码
+          # 先跑 flutter pub get 确保包已下载
+          flutter pub get
+          LLAMA_SRC=$(find /opt/hostedtoolcache /home/runner /root . -path \
+            '*llama_cpp_dart*/src/llama.cpp/llama.h' -type f 2>/dev/null | head -1 | \
+            sed 's|/llama\.h$||' | sed 's|/include/llama\.h$||' || echo "")
+          if [ -n "$LLAMA_SRC" ] && [ -f "$LLAMA_SRC/llama.h" ]; then
+            echo "=== 使用 llama_cpp_dart 绑定的兼容版本: $LLAMA_SRC ==="
+            cp -r "$LLAMA_SRC" /tmp/llama.cpp
+          else
+            echo "=== 未找到包内源码，回退到固定版本 ==="
+            git clone --depth=1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp
+          fi
           cd /tmp/llama.cpp
-          mkdir build && cd build
+          mkdir -p build && cd build
           cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON             -DLLAMA_CUDA=OFF -DLLAMA_METAL=OFF -DLLAMA_VULKAN=OFF             -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF             -DGGML_OPENMP=OFF             ..
           cmake --build . --target llama -j$(nproc)
           # 复制全部 .so 到 jniLibs
