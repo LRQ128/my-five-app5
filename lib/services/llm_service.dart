@@ -1,13 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter_gemma/flutter_gemma.dart'
-    hide Message; // 冲突：flutter_gemma 也有 Message 类
+    hide Message; // flutter_gemma 的 Message 与我们的冲突
+import 'package:flutter_gemma/core/message.dart' as gemma_msg;
 
 import '../models/message.dart';
 import '../models/model_config.dart';
 
 // =============================================================================
-// 抽象 LLM 服务接口（保持不变，方便切换后端）
+// 抽象 LLM 服务接口
 // =============================================================================
 
 abstract class LlmService {
@@ -33,10 +34,7 @@ abstract class LlmService {
 // =============================================================================
 
 /// 基于 flutter_gemma 的 LLM 服务实现。
-///
-/// flutter_gemma 使用 Android 原生 LiteRT-LM 引擎（Platform Channel），
-/// 不走 dart:ffi，不会出现 FFI 闪退问题。
-/// 支持多种模型（Gemma、Qwen、Phi-4、DeepSeek 等 .litertlm 格式）。
+/// 使用 Android 原生引擎（Platform Channel），不走 dart:ffi，不会闪退。
 class FlutterGemmaService implements LlmService {
   @override
   bool isModelLoaded = false;
@@ -44,32 +42,19 @@ class FlutterGemmaService implements LlmService {
   @override
   ModelConfig? currentConfig;
 
-  /// flutter_gemma 的 InferenceModel 实例
   InferenceModel? _model;
-
-  /// flutter_gemma 的 Chat 实例
   InferenceChat? _chat;
-
-  /// 停止标志
   bool _stopRequested = false;
 
   FlutterGemmaService();
 
-  // ---------------------------------------------------------------------------
-  // 加载模型
-  // ---------------------------------------------------------------------------
-
   @override
   Future<void> loadModel(ModelConfig config) async {
     if (isModelLoaded) await unloadModel();
-
     _stopRequested = false;
 
     try {
-      // 获取/激活已安装的模型
       _model = await FlutterGemma.getActiveModel(maxTokens: config.maxTokens);
-
-      // 创建 Chat 会话
       _chat = await _model!.createChat(
         temperature: config.temperature,
         randomSeed: 1,
@@ -77,7 +62,7 @@ class FlutterGemmaService implements LlmService {
         topP: config.topP,
         tokenBuffer: 256,
       );
-
+      await _chat!.initSession();
       isModelLoaded = true;
       currentConfig = config;
     } catch (e) {
@@ -103,10 +88,7 @@ class FlutterGemmaService implements LlmService {
     currentConfig = null;
   }
 
-  // ---------------------------------------------------------------------------
-  // 非流式生成
-  // ---------------------------------------------------------------------------
-
+  /// 非流式生成
   @override
   Future<String> generate(
     String prompt, {
@@ -116,20 +98,18 @@ class FlutterGemmaService implements LlmService {
     double? topP,
   }) async {
     if (_chat == null) return '⚠️ 模型未加载';
-
     _stopRequested = false;
+
     try {
-      final response = await _chat!.sendMessage(prompt);
+      await _chat!.addQuery(gemma_msg.Message.text(prompt));
+      final response = await _chat!.generateChatResponse();
       return response.text;
     } catch (e) {
       return '⚠️ 生成出错: $e';
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // 流式生成
-  // ---------------------------------------------------------------------------
-
+  /// 流式生成
   @override
   Stream<String> streamGenerate(
     String prompt, {
@@ -146,24 +126,20 @@ class FlutterGemmaService implements LlmService {
     _stopRequested = false;
 
     try {
-      await for (final event in _chat!.sendMessageStream(prompt)) {
+      await _chat!.addQuery(gemma_msg.Message.text(prompt));
+      await for (final response in _chat!.generateChatResponseAsync()) {
         if (_stopRequested) break;
-
-        if (event case ChatEvent.textEvent(:final text)) {
-          yield text;
-        }
+        yield response.text;
       }
     } catch (e) {
       yield '\n\n⚠️ 流式生成出错: $e';
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // 停止
-  // ---------------------------------------------------------------------------
-
+  /// 停止生成
   @override
   void stop() {
     _stopRequested = true;
+    _chat?.stopGeneration();
   }
 }

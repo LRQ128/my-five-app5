@@ -75,16 +75,17 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
         await FlutterGemma.installModel(
           modelType: _modelTypeForConfig(config),
           fileType: ModelFileType.litertlm,
-        ).fromNetwork(config.downloadUrl!).install(
-          onProgress: (progress) {
+        )
+          .fromNetwork(config.downloadUrl!)
+          .withProgress((progress) {
             if (!mounted) return;
             setState(() {
-              _downloadProgress = progress;
+              _downloadProgress = progress / 100.0;
               _downloadStatus =
-                  '下载中... ${(progress * 100).toStringAsFixed(0)}%';
+                  '下载中... ${progress}%';
             });
-          },
-        );
+          })
+          .install();
       }
 
       // 3. 通过 ModelManager 加载模型
