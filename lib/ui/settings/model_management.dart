@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../models/model_config.dart';
 import '../../services/model_manager.dart';
@@ -116,26 +117,75 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
       if (result == null || result.files.isEmpty) return;
 
       final file = result.files.first;
-      final filePath = file.path;
+      final originalPath = file.path;
 
-      if (filePath == null || !File(filePath).existsSync()) {
-        _showErrorSnackBar('文件不存在，请重新选择');
+      if (originalPath == null) {
+        _showErrorSnackBar('无法获取文件路径');
         return;
       }
 
-      // 解析文件名作为模型名
+      // 解析文件名
       final fileName = file.name;
       final modelName = fileName.replaceAll(RegExp(r'\.gguf$'), '');
+
+      // ★ 关键修复：复制文件到 App 私有目录
+      // Android SAF 返回 content:// URI，原生 C 代码 fopen() 打不开
+      // 必须复制到私目录让原生代码能访问
+      final appDir = await getApplicationDocumentsDirectory();
+      final modelsDir = Directory('${appDir.path}/models');
+      if (!await modelsDir.exists()) {
+        await modelsDir.create(recursive: true);
+      }
+
+      final destPath = '${modelsDir.path}/$fileName';
+      final destFile = File(destPath);
+
+      // 如果目标已存在且大小和源一致，跳过复制
+      if (await destFile.exists()) {
+        final sourceFile = File(originalPath);
+        try {
+          final sourceLen = await sourceFile.length();
+          final destLen = await destFile.length();
+          if (sourceLen == destLen) {
+            // 已存在且大小一致，直接使用
+          } else {
+            // 大小不同，重新复制
+            await sourceFile.copy(destPath);
+          }
+        } catch (_) {
+          // 读取源文件大小失败（可能是 content URI），直接复制
+          await destFile.writeAsBytes(await file.bytes ?? []);
+        }
+      } else {
+        // 尝试通过路径复制
+        try {
+          await File(originalPath).copy(destPath);
+        } catch (_) {
+          // 路径复制失败（content URI），通过 bytes 复制
+          if (file.bytes != null) {
+            await destFile.writeAsBytes(file.bytes!);
+          } else {
+            _showErrorSnackBar('无法访问文件内容');
+            return;
+          }
+        }
+      }
+
+      // 验证复制后的文件
+      if (!await destFile.exists()) {
+        _showErrorSnackBar('文件复制失败，请重试');
+        return;
+      }
 
       // 生成唯一ID
       final modelId =
           'custom_${DateTime.now().millisecondsSinceEpoch}';
 
-      // 创建新的 ModelConfig
+      // 创建新的 ModelConfig（使用复制后的路径）
       final customConfig = ModelConfig(
         id: modelId,
         name: modelName,
-        filePath: filePath,
+        filePath: destPath,
         description: '用户自定义模型: $fileName',
         isDefault: false,
       );
