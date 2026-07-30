@@ -37,6 +37,26 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
     super.initState();
   }
 
+  /// 将 ModelConfig id 映射到 ModelType 枚举
+  ModelType _modelTypeForConfig(ModelConfig config) {
+    switch (config.id) {
+      case 'qwen2.5-1.5b':
+        return ModelType.qwen;
+      case 'phi4-mini':
+        return ModelType.phi;
+      case 'deepseek-r1-1.5b':
+        return ModelType.deepSeek;
+      case 'gemma3-1b':
+        return ModelType.gemmaIt;
+      case 'qwen3-0.6b':
+        return ModelType.qwen3;
+      case 'function-gemma-270m':
+        return ModelType.functionGemma;
+      default:
+        return ModelType.qwen;
+    }
+  }
+
   /// 安装并加载模型
   Future<void> _installAndLoadModel(ModelConfig config) async {
     if (_installingModelId == config.id) return;
@@ -48,16 +68,13 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
     });
 
     try {
-      // 1. 检查模型是否已安装
-      _downloadStatus = '检查模型状态...';
-
-      // 2. 安装模型（flutter_gemma 会自动下载）
+      // 1. 安装模型（flutter_gemma 会自动下载）
       if (config.downloadUrl != null && config.downloadUrl!.isNotEmpty) {
         _downloadStatus = '正在下载模型...';
 
         await FlutterGemma.installModel(
-          modelType: config.id,
-          fileType: 'litertlm',
+          modelType: _modelTypeForConfig(config),
+          fileType: ModelFileType.litertlm,
         ).fromNetwork(config.downloadUrl!).install(
           onProgress: (progress) {
             if (!mounted) return;
