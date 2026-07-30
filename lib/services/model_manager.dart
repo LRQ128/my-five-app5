@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/model_config.dart';
 import 'llm_service.dart';
+// FlutterGemmaService 定义在 llm_service.dart 中
 import 'memory_service.dart';
 
 // =============================================================================
@@ -118,8 +119,8 @@ class ModelManager {
       _currentConfig = _getDefaultModel();
     }
 
-    // 4. 初始化 LlmService
-    _llmService = LlamaCppService(memoryService: _memoryService);
+    // 4. 初始化 LlmService（使用 flutter_gemma 后端）
+    _llmService = FlutterGemmaService();
 
     _initialized = true;
   }

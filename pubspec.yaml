@@ -4,7 +4,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.2.0 <4.0.0'
+  sdk: '>=3.5.0 <4.0.0'
 
 dependencies:
   flutter:
@@ -23,16 +23,14 @@ dependencies:
   # 网络
   http: ^1.2.1
 
-  # 本地AI推理（llama.cpp Dart绑定）
-  llama_cpp_dart: ^0.2.2
+  # ★ 本地AI推理 — 替换 llama_cpp_dart 为 flutter_gemma
+  flutter_gemma: ^1.4.1
 
   # 工具
   intl: ^0.19.0
   uuid: ^4.3.3
   permission_handler: ^11.3.0
   file_picker: ^8.0.0
-
-  # 向量检索（本地知识库）- 后续集成
 
 dev_dependencies:
   flutter_test:
@@ -41,5 +39,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/models/

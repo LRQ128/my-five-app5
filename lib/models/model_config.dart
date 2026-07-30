@@ -1,137 +1,190 @@
-/// 模型配置——支持热切换、多模型管理
+// =============================================================================
+// 模型配置 — 记录一个本地模型的参数
+// =============================================================================
+
+/// 模型配置
+///
+/// 描述一个可用的模型（包括推荐下载和用户自定义的）。
+/// 推荐模型列表引用 flutter_gemma 支持的 .litertlm 格式模型。
 class ModelConfig {
+  /// 唯一标识
   final String id;
+
+  /// 显示名称
   final String name;
+
+  /// 模型文件路径（本地文件系统）
   final String filePath;
+
+  /// 模型下载 URL（可选，用于从网络下载）
+  final String? downloadUrl;
+
+  /// 描述
   final String? description;
+
+  /// 参数量（如 "1.5B"、"270M"）
+  final String modelSize;
+
+  /// 量化类型
+  final String quantization;
+
+  /// 上下文长度
   final int contextSize;
-  final int maxTokens;
-  final double temperature;
-  final double topP;
-  final int threads;
+
+  /// 是否默认
   final bool isDefault;
-  final int modelSize; // 参数规模，如 7_000_000_000
-  final String quantization; // Q4_K_M, Q8_0 等
+
+  /// 温度
+  final double temperature;
+
+  /// Top-P
+  final double topP;
+
+  /// 最大 Token
+  final int maxTokens;
+
+  /// 是否支持函数调用
+  final bool supportsFunctionCalls;
+
+  /// 模型类型标识符（用于 flutter_gemma 的 installModel）
+  final String? modelType;
 
   const ModelConfig({
     required this.id,
     required this.name,
-    required this.filePath,
+    this.filePath = '',
+    this.downloadUrl,
     this.description,
+    this.modelSize = '0',
+    this.quantization = 'Q4_K_M',
     this.contextSize = 4096,
-    this.maxTokens = 2048,
+    this.isDefault = false,
     this.temperature = 0.7,
     this.topP = 0.9,
-    this.threads = 4,
-    this.isDefault = false,
-    this.modelSize = 7000000000,
-    this.quantization = 'Q4_K_M',
+    this.maxTokens = 4096,
+    this.supportsFunctionCalls = false,
+    this.modelType,
   });
 
-  ModelConfig copyWith({
-    String? id,
-    String? name,
-    String? filePath,
-    String? description,
-    int? contextSize,
-    int? maxTokens,
-    double? temperature,
-    double? topP,
-    int? threads,
-    bool? isDefault,
-    int? modelSize,
-    String? quantization,
-  }) {
-    return ModelConfig(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      filePath: filePath ?? this.filePath,
-      description: description ?? this.description,
-      contextSize: contextSize ?? this.contextSize,
-      maxTokens: maxTokens ?? this.maxTokens,
-      temperature: temperature ?? this.temperature,
-      topP: topP ?? this.topP,
-      threads: threads ?? this.threads,
-      isDefault: isDefault ?? this.isDefault,
-      modelSize: modelSize ?? this.modelSize,
-      quantization: quantization ?? this.quantization,
-    );
-  }
+  // ---------------------------------------------------------------------------
+  // 推荐模型列表
+  //
+  // 这些是 flutter_gemma 支持的模型，使用 LiteRT-LM/.litertlm 格式
+  // 模型会在用户选择后自动从 HuggingFace 下载
+  // ---------------------------------------------------------------------------
 
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'name': name,
-        'filePath': filePath,
-        'description': description,
-        'contextSize': contextSize,
-        'maxTokens': maxTokens,
-        'temperature': temperature,
-        'topP': topP,
-        'threads': threads,
-        'isDefault': isDefault,
-        'modelSize': modelSize,
-        'quantization': quantization,
-      };
-
-  factory ModelConfig.fromMap(Map<String, dynamic> map) => ModelConfig(
-        id: map['id'] as String,
-        name: map['name'] as String,
-        filePath: map['filePath'] as String,
-        description: map['description'] as String?,
-        contextSize: (map['contextSize'] as num?)?.toInt() ?? 4096,
-        maxTokens: (map['maxTokens'] as num?)?.toInt() ?? 2048,
-        temperature: (map['temperature'] as num?)?.toDouble() ?? 0.7,
-        topP: (map['topP'] as num?)?.toDouble() ?? 0.9,
-        threads: (map['threads'] as num?)?.toInt() ?? 4,
-        isDefault: (map['isDefault'] as bool?) ?? false,
-        modelSize: (map['modelSize'] as num?)?.toInt() ?? 7000000000,
-        quantization: (map['quantization'] as String?) ?? 'Q4_K_M',
-      );
-
-  /// 模型大小标签
-  String get sizeLabel {
-    if (modelSize >= 70000000000) return '70B';
-    if (modelSize >= 30000000000) return '30B';
-    if (modelSize >= 13000000000) return '14B';
-    if (modelSize >= 7000000000) return '7B';
-    if (modelSize >= 3000000000) return '3B';
-    return '1.5B';
-  }
-
-  /// 推荐模型配置
   static const List<ModelConfig> recommendedModels = [
     ModelConfig(
-      id: 'qwen2.5-7b-q4',
-      name: 'Qwen2.5-7B-Q4_K_M',
-      filePath: 'qwen2.5-7b-q4_k_m.gguf',
-      description: '阿里通义千问2.5 7B版，Q4量化，约4.5GB内存',
-      modelSize: 7000000000,
-      quantization: 'Q4_K_M',
+      id: 'qwen2.5-1.5b',
+      name: 'Qwen 2.5',
+      description: '阿里 Qwen2.5 1.5B 指令模型，中文支持好',
+      modelSize: '1.5B',
+      quantization: 'F16',
+      contextSize: 8192,
+      maxTokens: 4096,
       isDefault: true,
+      supportsFunctionCalls: false,
+      downloadUrl:
+          'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct',
     ),
     ModelConfig(
-      id: 'qwen2.5-14b-q4',
-      name: 'Qwen2.5-14B-Q4_K_M',
-      filePath: 'qwen2.5-14b-q4_k_m.gguf',
-      description: '阿里通义千问2.5 14B版，Q4量化，约8.5GB内存',
-      modelSize: 14000000000,
-      quantization: 'Q4_K_M',
+      id: 'phi4-mini',
+      name: 'Phi-4 Mini',
+      description: '微软 Phi-4 Mini 3.8B 轻量模型',
+      modelSize: '3.8B',
+      quantization: 'F16',
+      contextSize: 8192,
+      maxTokens: 4096,
+      downloadUrl:
+          'https://huggingface.co/litert-community/Phi-4-mini-instruct',
     ),
     ModelConfig(
-      id: 'qwen2.5-7b-q8',
-      name: 'Qwen2.5-7B-Q8_0',
-      filePath: 'qwen2.5-7b-q8_0.gguf',
-      description: '阿里通义千问2.5 7B版，Q8量化，约7GB内存',
-      modelSize: 7000000000,
-      quantization: 'Q8_0',
+      id: 'deepseek-r1-1.5b',
+      name: 'DeepSeek R1',
+      description: 'DeepSeek R1 蒸馏 Qwen 1.5B 推理模型',
+      modelSize: '1.5B',
+      quantization: 'F16',
+      contextSize: 8192,
+      maxTokens: 4096,
+      downloadUrl:
+          'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B',
     ),
     ModelConfig(
-      id: 'llama3.2-3b-q4',
-      name: 'Llama-3.2-3B-Q4_K_M',
-      filePath: 'llama-3.2-3b-q4_k_m.gguf',
-      description: 'Meta Llama 3.2 3B版，Q4量化，约2GB内存',
-      modelSize: 3000000000,
-      quantization: 'Q4_K_M',
+      id: 'gemma3-1b',
+      name: 'Gemma 3 Nano',
+      description: 'Google Gemma 3 1B 指令模型',
+      modelSize: '1B',
+      quantization: 'F16',
+      contextSize: 8192,
+      maxTokens: 4096,
+      downloadUrl:
+          'https://huggingface.co/litert-community/Gemma3-1B-IT',
+    ),
+    ModelConfig(
+      id: 'qwen3-0.6b',
+      name: 'Qwen3',
+      description: '阿里 Qwen3 0.6B 超轻量模型',
+      modelSize: '0.6B',
+      quantization: 'F16',
+      contextSize: 8192,
+      maxTokens: 4096,
+      downloadUrl:
+          'https://huggingface.co/litert-community/Qwen3-0.6B',
+    ),
+    ModelConfig(
+      id: 'function-gemma-270m',
+      name: 'FunctionGemma',
+      description: 'Google FunctionGemma 270M 函数调用模型',
+      modelSize: '270M',
+      quantization: 'F16',
+      contextSize: 4096,
+      maxTokens: 2048,
+      supportsFunctionCalls: true,
+      downloadUrl:
+          'https://huggingface.co/sasha-denisov/function-gemma-270M-it',
     ),
   ];
+
+  // ---------------------------------------------------------------------------
+  // 序列化
+  // ---------------------------------------------------------------------------
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'filePath': filePath,
+      'downloadUrl': downloadUrl,
+      'description': description,
+      'modelSize': modelSize,
+      'quantization': quantization,
+      'contextSize': contextSize,
+      'isDefault': isDefault,
+      'temperature': temperature,
+      'topP': topP,
+      'maxTokens': maxTokens,
+      'supportsFunctionCalls': supportsFunctionCalls,
+      'modelType': modelType,
+    };
+  }
+
+  factory ModelConfig.fromMap(Map<String, dynamic> map) {
+    return ModelConfig(
+      id: map['id'] as String? ?? '',
+      name: map['name'] as String? ?? '',
+      filePath: map['filePath'] as String? ?? '',
+      downloadUrl: map['downloadUrl'] as String?,
+      description: map['description'] as String?,
+      modelSize: map['modelSize'] as String? ?? '0',
+      quantization: map['quantization'] as String? ?? 'Q4_K_M',
+      contextSize: map['contextSize'] as int? ?? 4096,
+      isDefault: map['isDefault'] as bool? ?? false,
+      temperature: (map['temperature'] as num?)?.toDouble() ?? 0.7,
+      topP: (map['topP'] as num?)?.toDouble() ?? 0.9,
+      maxTokens: map['maxTokens'] as int? ?? 4096,
+      supportsFunctionCalls:
+          map['supportsFunctionCalls'] as bool? ?? false,
+      modelType: map['modelType'] as String?,
+    );
+  }
 }

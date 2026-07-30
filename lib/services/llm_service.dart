@@ -1,14 +1,11 @@
 import 'dart:async';
-import 'dart:io' as io;
-import 'dart:typed_data';
 
-import 'package:llama_cpp_dart/llama_cpp_dart.dart' hide Message;
+import 'package:flutter_gemma/flutter_gemma.dart';
 import '../models/message.dart';
 import '../models/model_config.dart';
-import 'memory_service.dart';
 
 // =============================================================================
-// 抽象 LLM 服务接口（保持兼容）
+// 抽象 LLM 服务接口（保持不变，方便切换后端）
 // =============================================================================
 
 abstract class LlmService {
@@ -26,82 +23,57 @@ abstract class LlmService {
       int maxTokens,
       double? temperature,
       double? topP});
-  Stream<String> generateWithTools(String prompt,
-      {List<Message>? history,
-      List<Map<String, dynamic>>? tools,
-      int maxTokens,
-      double? temperature,
-      double? topP});
+  Future<String> generateWithFunctionCalling(
+    String prompt, {
+    List<Message>? history,
+    List<Map<String, dynamic>>? tools,
+    int maxTokens,
+    double? temperature,
+    double? topP,
+  });
+  Stream<String> streamGenerateWithFunctionCalling(
+    String prompt, {
+    List<Message>? history,
+    List<Map<String, dynamic>>? tools,
+    int maxTokens,
+    double? temperature,
+    double? topP,
+  });
   void stop();
 }
 
 // =============================================================================
-// llama.cpp 后端 — 编译的 libllama.so + dart FFI
+// FlutterGemma 后端
 // =============================================================================
 
-class LlamaCppService implements LlmService {
+/// 基于 flutter_gemma 的 LLM 服务实现。
+///
+/// flutter_gemma 使用 Android 原生 LiteRT-LM 引擎（Platform Channel），
+/// 不走 dart:ffi，不会出现 FFI 闪退问题。
+/// 支持多种模型（Gemma、Qwen、Phi-4、DeepSeek 等 .litertlm 格式）。
+class FlutterGemmaService implements LlmService {
   @override
   bool isModelLoaded = false;
 
   @override
   ModelConfig? currentConfig;
 
-  LlamaParent? _llamaParent;
-  StreamSubscription? _subscription;
+  /// flutter_gemma 的 InferenceModel 实例
+  InferenceModel? _model;
+
+  /// flutter_gemma 的 Chat 实例
+  Chat? _chat;
+
+  /// 停止标志
   bool _stopRequested = false;
 
-  /// 记忆服务
-  final MemoryService? memoryService;
+  /// 当前正在发送的消息 complation
+  Completer<void>? _currentGeneration;
 
-  LlamaCppService({this.memoryService});
-
-  static const String _libName = 'libllama.so';
-
-  /// 模型加载超时（秒）
-  static const int _modelLoadTimeoutSeconds = 30;
+  FlutterGemmaService();
 
   // ---------------------------------------------------------------------------
-  // GGUF 文件头校验
-  // ---------------------------------------------------------------------------
-
-  /// GGUF 文件魔数（4 字节）
-  static final Uint8List _ggufMagic = Uint8List.fromList([0x47, 0x47, 0x55, 0x46]); // "GGUF"
-
-  /// 校验文件是否为合法的 GGUF 格式
-  ///
-  /// 会在加载前快速读取文件头 4 字节，确保是 GGUF 格式。
-  /// 如无法打开或魔数不匹配，抛出 [LlamaException]。
-  static void validateGgufFile(String filePath) {
-    try {
-      final file = io.File(filePath);
-      final raf = file.openSync(mode: io.FileMode.read);
-      try {
-        final header = raf.readSync(4);
-        if (header.length < 4 || !_listEquals(header, _ggufMagic)) {
-          throw LlamaException(
-            '文件不是合法的 GGUF 格式（文件头 4 字节应为 GGUF）。\n'
-            '请确认选择的是正确的 .gguf 模型文件。',
-          );
-        }
-      } finally {
-        raf.closeSync();
-      }
-    } on io.FileSystemException catch (e) {
-      throw LlamaException('无法读取模型文件: $e');
-    }
-  }
-
-  /// 字节列表相等比较
-  static bool _listEquals(Uint8List a, Uint8List b) {
-    if (a.length != b.length) return false;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
-
-  // ---------------------------------------------------------------------------
-  // 模型加载 / 卸载
+  // 加载模型
   // ---------------------------------------------------------------------------
 
   @override
@@ -110,130 +82,50 @@ class LlamaCppService implements LlmService {
 
     _stopRequested = false;
 
-    // 检查模型文件是否存在
-    final file = io.File(config.filePath);
-    if (!file.existsSync()) {
-      throw LlamaException(
-        '模型文件不存在: ${config.filePath}\n\n'
-        '推荐模型需要先下载 .gguf 文件到设备上。请使用「从本地选择 .gguf 模型文件」'
-        '功能选择已下载的模型文件。如需下载推荐模型，请使用联网搜索找到下载链接。',
-      );
-    }
-
-    // 检查文件大小（GGUF 最少几 MB）
-    final fileSize = file.lengthSync();
-    if (fileSize < 1024 * 1024) {
-      throw LlamaException(
-        '模型文件异常: ${config.filePath} (仅 $fileSize 字节)\n'
-        '文件可能损坏或不完整，请重新下载。',
-      );
-    }
-
-    // GGUF 文件头校验
-    validateGgufFile(config.filePath);
-
-    // 内存预估估算
-    final estimatedMemMB = fileSize ~/ (1024 * 1024) * 2; // 约文件大小的 2 倍
-    if (estimatedMemMB > 14000) {
-      throw LlamaException(
-        '模型可能需要约 $estimatedMemMB MB 内存（文件 ${fileSize ~/ (1024 * 1024)} MB x 2），'
-        '超过大部分设备可用内存。建议使用更小量化的版本。',
-      );
-    }
-
-    // 设置 .so 路径
-    Llama.libraryPath = _libName;
-
-    final modelParams = ModelParams()
-      ..nGpuLayers = 0; // 先设 0（纯 CPU 加载），后续可改
-    final contextParams = ContextParams()
-      ..nCtx = config.contextSize;
-    final samplerParams = SamplerParams()
-      ..temp = config.temperature
-      ..topP = config.topP;
-
-    final loadCommand = LlamaLoad(
-      path: config.filePath,
-      modelParams: modelParams,
-      contextParams: contextParams,
-      samplingParams: samplerParams,
-    );
-
-    _llamaParent = LlamaParent(loadCommand, ChatMLFormat());
-
-    // 将 init() 放在单独的函数中，用超时保护
     try {
-      await _initWithTimeout();
+      // 使用 flutter_gemma 获取/激活模型
+      _model = await FlutterGemma.getActiveModel(
+        maxTokens: config.maxTokens,
+        preferredBackend: PreferredBackend.gpu, // 优先 GPU 加速
+      );
+
+      // 创建 Chat 会话（支持流式输出）
+      _chat = await _model!.createChat(
+        temperature: config.temperature,
+        randomSeed: 1,
+        topK: 40,
+        topP: config.topP,
+        tokenBuffer: 256,
+      );
+
       isModelLoaded = true;
       currentConfig = config;
     } catch (e) {
-      // 清理残留状态
       isModelLoaded = false;
-      try {
-        _llamaParent?.dispose();
-      } catch (_) {}
-      _llamaParent = null;
-
-      final errMsg = e.toString();
-      if (errMsg.contains('timed out') || errMsg.contains('Timeout')) {
-        throw LlamaException(
-          '模型加载超时（${_modelLoadTimeoutSeconds}秒）。\n'
-          '可能是文件过大或设备内存不足。建议使用更小量化的模型。',
-        );
-      }
-      throw LlamaException('模型加载失败: $errMsg');
+      _model = null;
+      _chat = null;
+      rethrow;
     }
-  }
-
-  /// 带超时的初始化
-  Future<void> _initWithTimeout() async {
-    final completer = Completer<void>();
-
-    // 在下一个微任务中启动加载，确保超时计时器能先注册
-    Future.microtask(() async {
-      try {
-        await _llamaParent!.init();
-        if (!completer.isCompleted) {
-          completer.complete();
-        }
-      } catch (e) {
-        if (!completer.isCompleted) {
-          completer.completeError(e);
-        }
-      }
-    });
-
-    // 超时保护
-    final timeout = Future.delayed(
-      Duration(seconds: _modelLoadTimeoutSeconds),
-      () {
-        if (!completer.isCompleted) {
-          // 超时了 —— 强制清理
-          completer.completeError(
-            TimeoutException('模型加载超时（${_modelLoadTimeoutSeconds}秒）'),
-          );
-        }
-      },
-    );
-
-    await Future.any([completer.future, timeout]);
   }
 
   @override
   Future<void> unloadModel() async {
     _stopRequested = true;
-    await _subscription?.cancel();
-    _subscription = null;
+    _currentGeneration = null;
     try {
-      _llamaParent?.dispose();
+      await _chat?.close();
     } catch (_) {}
-    _llamaParent = null;
+    try {
+      await _model?.close();
+    } catch (_) {}
+    _chat = null;
+    _model = null;
     isModelLoaded = false;
     currentConfig = null;
   }
 
   // ---------------------------------------------------------------------------
-  // 生成（非流式）
+  // 非流式生成
   // ---------------------------------------------------------------------------
 
   @override
@@ -244,34 +136,15 @@ class LlamaCppService implements LlmService {
     double? temperature,
     double? topP,
   }) async {
-    if (_llamaParent == null) return '⚠️ 模型未加载';
+    if (_chat == null) return '⚠️ 模型未加载';
 
     _stopRequested = false;
-    final output = StringBuffer();
-    final completer = Completer<String>();
-
-    _subscription = _llamaParent!.stream.listen(
-      (response) {
-        if (_stopRequested) {
-          completer.complete(output.toString());
-          return;
-        }
-        output.write(response);
-      },
-      onDone: () {
-        if (!completer.isCompleted) {
-          completer.complete(output.toString());
-        }
-      },
-      onError: (e) {
-        if (!completer.isCompleted) {
-          completer.complete('⚠️ 推理出错: $e');
-        }
-      },
-    );
-
-    _llamaParent!.sendPrompt(prompt);
-    return completer.future;
+    try {
+      final response = await _chat!.sendMessage(prompt);
+      return response.text;
+    } catch (e) {
+      return '⚠️ 生成出错: $e';
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -285,68 +158,109 @@ class LlamaCppService implements LlmService {
     int maxTokens = 4096,
     double? temperature,
     double? topP,
-  }) {
-    return _createStream(prompt);
+  }) async* {
+    if (_chat == null) {
+      yield '⚠️ 模型未加载';
+      return;
+    }
+
+    _stopRequested = false;
+    final completer = Completer<void>();
+    _currentGeneration = completer;
+
+    try {
+      await for (final event in _chat!.sendMessageStream(prompt)) {
+        if (_stopRequested) break;
+
+        switch (event) {
+          case ChatEvent.textEvent(:final text):
+            yield text;
+          case ChatEvent.toolCallEvent():
+            // 函数调用事件（没有函数注册时由回调处理）
+            break;
+        }
+      }
+    } catch (e) {
+      yield '\n\n⚠️ 流式生成出错: $e';
+    } finally {
+      if (!completer.isCompleted) completer.complete();
+    }
+
+    _currentGeneration = null;
   }
 
+  // ---------------------------------------------------------------------------
+  // 带函数调用的生成
+  // ---------------------------------------------------------------------------
+
   @override
-  Stream<String> generateWithTools(
+  Future<String> generateWithFunctionCalling(
     String prompt, {
     List<Message>? history,
     List<Map<String, dynamic>>? tools,
     int maxTokens = 4096,
     double? temperature,
     double? topP,
-  }) {
-    return _createStream(prompt);
+  }) async {
+    if (_chat == null) return '⚠️ 模型未加载';
+
+    _stopRequested = false;
+    try {
+      final response = await _chat!.sendMessage(prompt);
+      return response.text;
+    } catch (e) {
+      return '⚠️ 生成出错: $e';
+    }
   }
 
   @override
-  void stop() {
-    _stopRequested = true;
-    _subscription?.cancel();
-  }
-
-  // ---------------------------------------------------------------------------
-  // 核心流式
-  // ---------------------------------------------------------------------------
-
-  Stream<String> _createStream(String prompt) async* {
-    if (_llamaParent == null) {
+  Stream<String> streamGenerateWithFunctionCalling(
+    String prompt, {
+    List<Message>? history,
+    List<Map<String, dynamic>>? tools,
+    int maxTokens = 4096,
+    double? temperature,
+    double? topP,
+  }) async* {
+    if (_chat == null) {
       yield '⚠️ 模型未加载';
       return;
     }
 
     _stopRequested = false;
-    final output = StringBuffer();
+    _currentGeneration = Completer<void>();
 
-    _subscription = _llamaParent!.stream.listen(
-      (response) {
-        output.write(response);
-      },
-      onDone: () {},
-      onError: (e) {
-        output.write('\n\n⚠️ 推理出错: $e');
-      },
-    );
+    try {
+      await for (final event in _chat!.sendMessageStream(prompt)) {
+        if (_stopRequested) break;
 
-    _llamaParent!.sendPrompt(prompt);
-
-    while (!_stopRequested) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (output.isNotEmpty) {
-        final text = output.toString();
-        output.clear();
-        yield text;
+        if (event case ChatEvent.textEvent(:final text)) {
+          yield text;
+        }
       }
+    } catch (e) {
+      yield '\n\n⚠️ 出错: $e';
+    } finally {
+      _currentGeneration?.complete();
+      _currentGeneration = null;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 停止
+  // ---------------------------------------------------------------------------
+
+  @override
+  void stop() {
+    _stopRequested = true;
+    // flutter_gemma 的 Chat 没有中断方法，但可以在事件循环中退出
   }
 }
 
-/// llama.cpp 相关异常
-class LlamaException implements Exception {
+/// 模型加载异常
+class ModelLoadException implements Exception {
   final String message;
-  const LlamaException(this.message);
+  const ModelLoadException(this.message);
 
   @override
   String toString() => message;

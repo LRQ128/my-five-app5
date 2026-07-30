@@ -28,43 +28,8 @@ jobs:
       - name: Accept licenses
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Build libllama.so (Android native)
-        run: |
-          # 方案 A：固定使用 llama_cpp_dart 0.2.2 同期发布的 llama.cpp 版本
-          # 0.2.2 发布于 3 个月前，对应 llama.cpp commit ~b3613 前后
-          # 使用一个已验证兼容的旧 commit，避免主分支 API 变更导致崩溃
-          git clone --depth=1 https://github.com/ggml-org/llama.cpp /tmp/llama.cpp
-          cd /tmp/llama.cpp
-          # 回退到 0.2.2 同期的稳定 commit（大约 2025年4月）
-          git fetch --depth=1 origin b3613bb5c4ce8b1d3b0b6b1eaa1a1b1f5b1e1f1f 2>/dev/null || true
-          git fetch --depth=1 origin b3453 2>/dev/null || true
-          # 如果 fetch 失败，保持 master（默认）
-          git checkout master 2>/dev/null || true
-          mkdir -p build && cd build
-          # 使用与 v0.2.2 FFI 绑定兼容的编译选项
-          # - 关闭 CUDA/Metal/Vulkan（手机上没用）
-          # - 关闭 OpenMP（Android 兼容性）
-          # - 关闭测试和示例
-          cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON             -DLLAMA_CUDA=OFF -DLLAMA_METAL=OFF -DLLAMA_VULKAN=OFF             -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF             -DGGML_OPENMP=OFF             ..
-          cmake --build . --target llama -j$(nproc)
-          # 复制生成的 .so 到 jniLibs（libllama.so + libggml.so + 其他依赖）
-          find . -name "*.so" -exec cp -v {} ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/ \;
-          # 也从 NDK 复制 libomp.so 备用
-          find ${ANDROID_NDK} -name "libomp.so" 2>/dev/null -exec cp -v {} ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/ \;
-          echo "=== JNILIBS CONTENTS ==="
-          ls -lh ${{ github.workspace }}/android/app/src/main/jniLibs/arm64-v8a/
-
-      - name: Apply Android config
-        run: |
-          mkdir -p assets/models/ fonts/
-          touch assets/models/.gitkeep fonts/.gitkeep
-          sed -i 's|minSdk = flutter\.minSdkVersion|minSdk 26|' android/app/build.gradle || true
-
       - name: Pub get
         run: flutter pub get
-
-      - name: Dart analyze (diagnostic)
-        run: flutter analyze --no-pub 2>&1 | tee /tmp/analyze_log.txt
 
       - name: Build APK
         run: |
@@ -76,9 +41,7 @@ jobs:
         if: failure()
         with:
           name: build_log
-          path: |
-            /tmp/build_log.txt
-            /tmp/analyze_log.txt
+          path: /tmp/build_log.txt
 
       - name: Sign APK
         run: |
