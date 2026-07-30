@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' as io;
 
 import 'package:llama_cpp_dart/llama_cpp_dart.dart' hide Message;
 import '../models/message.dart';
@@ -52,8 +53,23 @@ class LlamaCppService implements LlmService {
 
     _stopRequested = false;
 
-    // 模型文件路径（用户下载后存在应用目录下）
-    final modelPath = config.filePath;
+    // 检查模型文件是否存在
+    final file = io.File(config.filePath);
+    if (!file.existsSync()) {
+      throw LlamaException(
+        '模型文件不存在: ${config.filePath}\n\n'
+        '推荐模型需要先下载 .gguf 文件到设备上。请使用「从本地选择 .gguf 模型文件」'
+        '功能选择已下载的模型文件。如需下载推荐模型，请使用联网搜索找到下载链接。',
+      );
+    }
+
+    // 检查文件大小是否合理（GGUF 最小几 MB）
+    if (file.lengthSync() < 1024 * 1024) {
+      throw LlamaException(
+        '模型文件异常: ${config.filePath} (仅 ${file.lengthSync()} 字节)\n'
+        '文件可能损坏或不完整，请重新下载。',
+      );
+    }
 
     // 设置 .so 路径
     Llama.libraryPath = _libName;
@@ -67,7 +83,7 @@ class LlamaCppService implements LlmService {
       ..topP = config.topP;
 
     final loadCommand = LlamaLoad(
-      path: modelPath,
+      path: config.filePath,
       modelParams: modelParams,
       contextParams: contextParams,
       samplingParams: samplerParams,
@@ -81,7 +97,17 @@ class LlamaCppService implements LlmService {
     } catch (e) {
       isModelLoaded = false;
       _llamaParent = null;
-      rethrow;
+      // 提取原生错误中的有用信息，不要抛原生异常
+      final errMsg = e.toString();
+      if (errMsg.contains('failed to load model') || 
+          errMsg.contains('gguf') ||
+          errMsg.contains('GGML')) {
+        throw LlamaException(
+          '模型加载失败: 文件可能损坏或不兼容\n'
+          '请检查 .gguf 文件是否完整，或尝试使用其他量化版本。',
+        );
+      }
+      throw LlamaException('模型加载失败: $errMsg');
     }
   }
 
@@ -205,4 +231,13 @@ class LlamaCppService implements LlmService {
       }
     }
   }
+}
+
+/// llama.cpp 相关异常
+class LlamaException implements Exception {
+  final String message;
+  const LlamaException(this.message);
+
+  @override
+  String toString() => message;
 }
