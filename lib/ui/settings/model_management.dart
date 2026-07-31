@@ -593,10 +593,26 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
           if (!mounted) return;
           setState(() {
             _downloadProgress = progress / 100.0;
-            _downloadStatus = '安装中... $progress%';
+            _downloadStatus = '注册中... $progress%';
           });
         })
         .install();
+
+      if (!mounted) return;
+      setState(() {
+        _downloadStatus = '正在加载模型...';
+      });
+
+      // 构建 ModelConfig 并加载模型
+      final localConfig = ModelConfig(
+        id: '__local_$fileName',
+        name: fileName,
+        filePath: filePath,
+        modelSize: '本地模型',
+        contextSize: 4096,
+        maxTokens: 2048,
+      );
+      await widget.modelManager.switchModel(localConfig);
 
       if (!mounted) return;
       setState(() {
@@ -605,6 +621,7 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
         _downloadStatus = '本地模型已加载';
       });
 
+      widget.onModelSwitched?.call(localConfig);
       _showSuccessSnackBar('本地模型 $fileName 加载成功！');
     } catch (e) {
       if (!mounted) return;

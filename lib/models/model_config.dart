@@ -85,7 +85,7 @@ class ModelConfig {
       isDefault: true,
       supportsFunctionCalls: false,
       downloadUrl:
-          'https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct',
+          'https://hf-mirror.com/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm',
     ),
     ModelConfig(
       id: 'phi4-mini',
@@ -96,7 +96,7 @@ class ModelConfig {
       contextSize: 8192,
       maxTokens: 4096,
       downloadUrl:
-          'https://huggingface.co/litert-community/Phi-4-mini-instruct',
+          'https://hf-mirror.com/litert-community/Phi-4-mini-instruct/resolve/main/Phi-4-mini-instruct_multi-prefill-seq_q8_ekv4096.litertlm',
     ),
     ModelConfig(
       id: 'deepseek-r1-1.5b',
@@ -107,7 +107,7 @@ class ModelConfig {
       contextSize: 8192,
       maxTokens: 4096,
       downloadUrl:
-          'https://huggingface.co/litert-community/DeepSeek-R1-Distill-Qwen-1.5B',
+          'https://hf-mirror.com/litert-community/DeepSeek-R1-Distill-Qwen-1.5B/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B_multi-prefill-seq_q8_ekv4096.litertlm',
     ),
     ModelConfig(
       id: 'gemma3-1b',
@@ -118,7 +118,7 @@ class ModelConfig {
       contextSize: 8192,
       maxTokens: 4096,
       downloadUrl:
-          'https://huggingface.co/litert-community/Gemma3-1B-IT',
+          'https://hf-mirror.com/litert-community/Gemma3-1B-IT/resolve/main/Gemma3-1B-IT_multi-prefill-seq_q8_ekv8192.litertlm',
     ),
     ModelConfig(
       id: 'qwen3-0.6b',
@@ -129,7 +129,7 @@ class ModelConfig {
       contextSize: 8192,
       maxTokens: 4096,
       downloadUrl:
-          'https://huggingface.co/litert-community/Qwen3-0.6B',
+          'https://hf-mirror.com/litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B_multi-prefill-seq_q8_ekv8192.litertlm',
     ),
     ModelConfig(
       id: 'function-gemma-270m',
@@ -141,7 +141,7 @@ class ModelConfig {
       maxTokens: 2048,
       supportsFunctionCalls: true,
       downloadUrl:
-          'https://huggingface.co/sasha-denisov/function-gemma-270M-it',
+          'https://hf-mirror.com/sasha-denisov/function-gemma-270M-it/resolve/main/function-gemma-270M-it_q8_ekv2560.task',
     ),
   ];
 
