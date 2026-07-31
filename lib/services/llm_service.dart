@@ -107,7 +107,7 @@ class FlutterGemmaService implements LlmService {
           .timeout(const Duration(seconds: 60));
       return switch (response) {
         gemma_resp.TextResponse t => t.token,
-        gemma_resp.ThinkingResponse t => t.thinkingToken,
+        gemma_resp.ThinkingResponse t => t.content,
         _ => response.toString(),
       };
     } on TimeoutException {
@@ -143,7 +143,7 @@ class FlutterGemmaService implements LlmService {
         if (response is gemma_resp.TextResponse) {
           yield response.token;
         } else if (response is gemma_resp.ThinkingResponse) {
-          yield response.thinkingToken;
+          yield response.content;
         }
       }
     } on TimeoutException catch (_) {
