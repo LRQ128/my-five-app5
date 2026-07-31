@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/model_config.dart';
