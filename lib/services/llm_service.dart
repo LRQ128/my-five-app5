@@ -89,7 +89,7 @@ class FlutterGemmaService implements LlmService {
     currentConfig = null;
   }
 
-  /// 非流式生成
+  /// 非流式生成（带超时保护）
   @override
   Future<String> generate(
     String prompt, {
@@ -103,12 +103,15 @@ class FlutterGemmaService implements LlmService {
 
     try {
       await _chat!.addQuery(gemma_msg.Message.text(text: prompt));
-      final response = await _chat!.generateChatResponse();
-      // ModelResponse is a sealed class; extract text from TextResponse
+      final response = await _chat!.generateChatResponse()
+          .timeout(const Duration(seconds: 60));
       return switch (response) {
         gemma_resp.TextResponse t => t.token,
+        gemma_resp.ThinkingResponse t => t.thinkingToken,
         _ => response.toString(),
       };
+    } on TimeoutException {
+      return '⚠️ 模型响应超时（超过60秒），请稍后重试';
     } catch (e) {
       return '⚠️ 生成出错: $e';
     }
@@ -132,13 +135,19 @@ class FlutterGemmaService implements LlmService {
 
     try {
       await _chat!.addQuery(gemma_msg.Message.text(text: prompt));
-      await for (final response in _chat!.generateChatResponseAsync()) {
+      final stream = _chat!.generateChatResponseAsync()
+          .timeout(const Duration(seconds: 120));
+      await for (final response in stream) {
         if (_stopRequested) break;
         // ModelResponse is a sealed class; extract text from TextResponse
         if (response is gemma_resp.TextResponse) {
           yield response.token;
+        } else if (response is gemma_resp.ThinkingResponse) {
+          yield response.thinkingToken;
         }
       }
+    } on TimeoutException catch (_) {
+      yield '\n\n⚠️ 模型响应超时，请稍后重试';
     } catch (e) {
       yield '\n\n⚠️ 流式生成出错: $e';
     }

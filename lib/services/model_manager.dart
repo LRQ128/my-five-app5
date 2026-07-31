@@ -122,6 +122,41 @@ class ModelManager {
     // 4. 初始化 LlmService（使用 flutter_gemma 后端）
     _llmService = FlutterGemmaService();
 
+    // 5. 自动加载上次使用的模型
+    if (_currentConfig != null) {
+      try {
+        // 如果是本地文件导入的模型，需要先重新注册文件
+        if (_currentConfig!.filePath != null) {
+          final filePath = _currentConfig!.filePath!;
+          final fileExists = await Future.value(filePath.isNotEmpty);
+          if (fileExists) {
+            try {
+              // 尝试通过 fromFile 重新安装（确保 flutter_gemma 能定位文件）
+              final ext = filePath.split('.').last.toLowerCase();
+              final fileType = switch (ext) {
+                'task' => ModelFileType.task,
+                'bin' || 'tflite' => ModelFileType.binary,
+                'litertlm' => ModelFileType.litertlm,
+                _ => ModelFileType.litertlm,
+              };
+              await FlutterGemma.installModel(
+                modelType: ModelType.qwen,
+                fileType: fileType,
+              )
+                .fromFile(filePath)
+                .install();
+            } catch (_) {
+              // 重新注册失败时静默处理
+            }
+          }
+        }
+        // 加载模型到内存
+        await _llmService!.loadModel(_currentConfig!);
+      } catch (e) {
+        // 自动加载失败不影响启动，用户可手动选择模型
+      }
+    }
+
     _initialized = true;
   }
 
