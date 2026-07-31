@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 
@@ -154,6 +157,10 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
         children: [
           // 当前加载模型卡片
           _buildCurrentModelCard(),
+          const SizedBox(height: 24),
+
+          // 从本地文件加载
+          _buildLocalFileSection(),
           const SizedBox(height: 24),
 
           // 可用模型列表
@@ -455,6 +462,167 @@ class _ModelManagementPageState extends State<ModelManagementPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 从本地文件加载模型
+  Widget _buildLocalFileSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader('从本地文件加载'),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: AppConstants.surfaceColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.05),
+                width: 1,
+              ),
+            ),
+            child: InkWell(
+              onTap: _pickAndInstallLocalModel,
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppConstants.accentColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.folder_open,
+                        color: AppConstants.accentColor,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '从手机文件选择',
+                            style: TextStyle(
+                              color: AppConstants.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '选择本地的 .litertlm / .task / .bin 模型文件',
+                            style: TextStyle(
+                              color: AppConstants.textSecondary
+                                  .withOpacity(0.6),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_ios,
+                      size: 16,
+                      color: AppConstants.textSecondary.withOpacity(0.4),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              '⚠️ GGUF 格式不兼容 flutter_gemma 引擎，无法直接加载',
+              style: TextStyle(
+                color: AppConstants.warningColor.withOpacity(0.8),
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAndInstallLocalModel() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['litertlm', 'task', 'bin', 'tflite'],
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final filePath = result.files.single.path;
+      if (filePath == null) return;
+
+      final fileName = result.files.single.name;
+
+      if (!mounted) return;
+      setState(() {
+        _installingModelId = '__local__';
+        _downloadStatus = '正在安装本地模型: $fileName';
+      });
+
+      // 自动识别文件类型
+      final ext = fileName.split('.').last.toLowerCase();
+      final fileType = switch (ext) {
+        'task' => ModelFileType.task,
+        'bin' || 'tflite' => ModelFileType.binary,
+        'litertlm' => ModelFileType.litertlm,
+        _ => ModelFileType.litertlm,
+      };
+
+      await FlutterGemma.installModel(
+        modelType: ModelType.qwen,
+        fileType: fileType,
+      )
+        .fromFile(filePath)
+        .withProgress((progress) {
+          if (!mounted) return;
+          setState(() {
+            _downloadProgress = progress / 100.0;
+            _downloadStatus = '安装中... $progress%';
+          });
+        })
+        .install();
+
+      if (!mounted) return;
+      setState(() {
+        _installingModelId = null;
+        _downloadProgress = 1.0;
+        _downloadStatus = '本地模型已加载';
+      });
+
+      _showSuccessSnackBar('本地模型 $fileName 加载成功！');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _installingModelId = null;
+        _downloadStatus = '加载失败: $e';
+      });
+      _showErrorSnackBar('本地模型加载失败: $e');
+    }
+  }
+
+  void _showSuccessSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(fontSize: 13)),
+        backgroundColor: AppConstants.successColor,
+        duration: const Duration(seconds: 3),
       ),
     );
   }

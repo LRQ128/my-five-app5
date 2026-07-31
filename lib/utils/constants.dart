@@ -41,4 +41,5 @@ class AppConstants {
   static const Color accentColor = Color(0xFF00D9FF);
   static const Color errorColor = Color(0xFFFF4757);
   static const Color successColor = Color(0xFF2ED573);
+  static const Color warningColor = Color(0xFFFFA502);
 }
