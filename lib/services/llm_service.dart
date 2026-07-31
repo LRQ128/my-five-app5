@@ -55,7 +55,10 @@ class FlutterGemmaService implements LlmService {
     _stopRequested = false;
 
     try {
-      _model = await FlutterGemma.getActiveModel(maxTokens: config.maxTokens);
+      _model = await FlutterGemma.getActiveModel(
+        maxTokens: config.maxTokens,
+        preferredBackend: PreferredBackend.gpu,
+      );
       _chat = await _model!.createChat(
         temperature: config.temperature,
         randomSeed: 1,
